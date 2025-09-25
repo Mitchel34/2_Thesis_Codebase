@@ -1,0 +1,11 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Sample USGS/ERA5/NWM/NLCD quick checks",
+			"type": "shell",
+			"command": "echo 'Run quick sample checks'",
+			"args": []
+		}
+	]
+}

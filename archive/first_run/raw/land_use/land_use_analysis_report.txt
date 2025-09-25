@@ -1,0 +1,31 @@
+NLCD 2021 Land Use Analysis Report
+==================================================
+Generated: 2025-09-22 19:23:47
+Sites Analyzed: 1
+Data Source: NLCD 2021 (estimated)
+
+OVERALL STATISTICS:
+Mean Urban %: 11.91 ± nan
+Mean Forest %: 57.90 ± nan
+Mean Agriculture %: 15.19 ± nan
+Mean Impervious %: 6.99 ± nan
+
+REGULATION ANALYSIS:
+                   urban_percent  impervious_percent
+regulation_status                                   
+Unregulated                11.91                6.99
+
+STATE ANALYSIS:
+       urban_percent  forest_percent  agriculture_percent
+state                                                    
+NC             11.91            57.9                15.19
+
+SITE DETAILS:
+Watauga River, NC (NC) - Unregulated:
+  Urban: 11.91%, Forest: 57.9%, Ag: 15.19%, Impervious: 6.99%
+
+KEY FINDINGS:
+• Highest urban development: Watauga River, NC (11.91%)
+• Most forested: Watauga River, NC (57.9%)
+• Most agricultural: Watauga River, NC (15.19%)
+• Unregulated sites average 11.9% urban

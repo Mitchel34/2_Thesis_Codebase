@@ -1,0 +1,16 @@
+nwm_cms
+temp_c
+dewpoint_c
+pressure_hpa
+precip_mm
+radiation_mj_m2
+wind_speed
+vpd_kpa
+rel_humidity_pct
+soil_moisture_vwc
+hour_sin
+hour_cos
+doy_sin
+doy_cos
+month_sin
+month_cos
