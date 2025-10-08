@@ -1,118 +1,104 @@
-# Project Plan (Updated): Hourly NWM Post-processing with USGS Ground Truth
+# Project Plan: Foundation Model Extension for Hourly NWM Corrections
 
-Date: 2025-09-22
+Date: 2025-10-07
 Owner: Mitchel Carson
 
+## Summary
+- Hybrid transformer baseline trained on NWM 2010–2020 with 2021 validation achieves ~10% RMSE improvement against raw NWM; serves as control experiment.
+- Next milestone is integrating a Hugging Face foundation model to push accuracy further and benchmark against LSTM and other baselines.
+- Parallel effort required to draft Water Resources Research (WRR) manuscript, document architecture decisions, and produce publication-ready visuals.
+- Coordination items (plain language summary, CV/material sharing) remain active alongside technical execution.
+
 ## Objectives
-- Build a robust, site-centric pipeline to collect ERA5, USGS, NWM retrospective (v2.1/v3.0), and NLCD features at hourly cadence.
-- Train models to predict residuals (USGS − NWM) and produce corrected streamflow at hourly valid times.
-- Prioritize hourly-only analysis data (CHRTOUT) across the full period; defer lead-aware forecast analysis to optional, recent windows.
-- Evaluate with NSE, KGE, RMSE, Correlation Coefficient, and Percent Bias. Produce publication-quality plots.
-- Scale to multiple study sites and prepare a lightweight web app for exploration/download.
+- Adapt and fine-tune a suitable time series foundation model on the hourly NWM/USGS residual dataset and quantify gains versus the hybrid transformer and LSTM baselines.
+- Maintain a reproducible experiment stack (data prep, configs, checkpoints, metrics) to support thesis defensibility and manuscript requirements.
+- Draft the WRR-format paper, emphasizing the model architecture, methodology, results, and plain-language summary.
+- Create high-quality visualizations (plots, tables, architecture diagrams) that align with WRR submission standards and thesis deliverables.
+- Track collaborative tasks (e.g., CV exchange, template alignment) to keep stakeholders informed.
 
-## Current Status (✅)
-- NWM
-  - v3.0 retrospective CHRTOUT (2021–2023) pull implemented and validated for sample windows (hourly only, no leads). Files saved under `data/raw/nwm_v3/retrospective/`.
-  - v2.1 retrospective hourly (1979–2020) reader via S3 Zarr already implemented (optional for longer history).
-  - Operational short_range (with leads) implemented but used only for recent windows; not required for baseline.
-  - NCEI THREDDS archive for 2021–2023 short_range could not be confirmed (probes returned 404/0-coverage). Decision: do not depend on archived short_range.
-- ERA5
-  - Hourly/6h downloader functional with derived features; per-site monthly CSV outputs.
-- USGS
-  - Hourly resampling and unit conversion to cms working; timestamps normalized to UTC.
-- Modeling dataset builder
-  - Updated to hourly-only: loads NWM CHRTOUT, aligns with USGS and ERA5, computes residuals, outputs Parquet and CSV sample.
-  - Verified on 2023-01-01 00–05Z window, wrote Parquet and sample CSV in `data/clean/modeling/`.
-- Documentation
-  - This plan updated to reflect hourly-only decision and concrete next steps.
+## Current Status Snapshot
+- Data pipeline produces aligned hourly datasets (2010–2022) for training/validation/testing; residual labels verified.
+- Hybrid transformer implementation operational in PyTorch (`modeling/train_quick_transformer_torch.py`) with quick-eval tooling.
+- Early analysis shows ~10% RMSE improvement on 2021 validation relative to raw NWM baselines.
+- WRR LaTeX template identified; outline discussions established (four-author format, title flexibility).
+- Visual assets currently limited to diagnostic plots; publication-grade figures outstanding.
 
-## Key Decisions
-- Use hourly NWM analysis (CHRTOUT) for 2021–2023 and earlier (v2.1) to ensure full coverage without lead dependencies.
-- Remove lead_time dependency from core pipeline and dataset. Keep optional lead-aware path for future extensions with operational data.
-- Store aligned datasets in Parquet; sample CSVs for quick inspection.
+## Workstreams & Key Tasks
 
-## Data Sources & Layout
-- USGS NWIS instantaneous discharge → hourly CMS
-  - Input: `data/raw/usgs/<usgs_id>_<year>.csv`
-- ERA5 Single-level + ERA5-Land → hourly/6h features
-  - Input: `data/raw/era5/<site>/<site>_<yyyy-mm>.csv` (merged per site-month)
-- NWM retrospective
-  - v3.0 CHRTOUT (2021–2023, hourly): `s3://noaa-nwm-retrospective-3-0-pds/CONUS/netcdf/CHRTOUT/YYYY/YYYYMMDDHHMM.CHRTOUT_DOMAIN1`
-  - v2.1 CHRTOUT (1979–2020, hourly via Zarr): `s3://noaa-nwm-retrospective-2-1-zarr-pds/chrtout.zarr`
-  - Local outputs: `data/raw/nwm_v3/retrospective/nwm_v3_hourly_YYYYMMDD_YYYYMMDD.csv`
-- NLCD static features: `data/raw/land_use/nlcd_2021_land_use_metrics.csv`
+### 1. Foundation Model Integration
+- Identify candidate Hugging Face models (e.g., TimeGPT, Chronos, Temporal Fusion Transformer variants) and assess licensing, input requirements, and computational demands.
+- Prototype data adapters to map hourly residual sequences into the foundation model format (windowing, feature scaling, static metadata handling).
+- Fine-tune chosen model on 2010–2020 training data with 2021 validation; log checkpoints, configuration files, and training curves.
+- Run comparative inference on 2022 test data; capture RMSE/NSE/KGE/PBias and qualitative diagnostics.
+- Document findings and decision rationale for inclusion in thesis and paper.
 
-## Current Scripts
-- `data_acquisition_scripts/usgs.py` – USGS hourly, UTC normalization, cms conversion.
-- `data_acquisition_scripts/era5.py` – ERA5 downloader with hourly/6h cadence and derived features.
-- `data_acquisition_scripts/nwm.py` – NWM collectors:
-  - `retrospective_v3` (v3.0 CHRTOUT hourly, 2021–2023)
-  - `retrospective` (v2.1 CHRTOUT hourly via Zarr, 1979–2020)
-  - `operational` (short_range with leads, optional/recent)
-  - `archive` (short_range via HTTP; not used—no working endpoint confirmed)
-- `modeling/build_training_dataset.py` – hourly-only alignment; computes residuals; outputs Parquet + sample CSV.
-- `data_acquisition_scripts/tools/check_nwm_archive_leads.py` – probe utility confirming lack of NCEI archived short_range coverage for our test windows.
+### 2. Baseline Refresh & Comparative Benchmarks
+- Reproduce hybrid transformer training runs to establish control metrics with up-to-date data splits and logging.
+- Implement LSTM (and any other reference models already scoped) with consistent preprocessing and evaluation scripts.
+  - New script: `modeling/train_quick_lstm_torch.py --data <path>` mirrors the transformer CLI; outputs saved under `data/clean/modeling/` for side-by-side metrics.
+- Create a comparison matrix summarizing performance across models and sites; flag statistically significant gains.
+- Archive artefacts (models, logs, configs) in versioned storage for reproducibility.
 
-## Minimal Contract (hourly-only)
-Inputs
-- Study sites: `config/master_study_sites.py` (requires `usgs_id` and `nwm_comid`)
-- Date window: start, end (UTC)
+### 3. WRR Paper Draft (LaTeX)
+- Set up WRR template repository/workspace, confirm author order, and update metadata (title, affiliations).
+- Draft Plain Language Summary, Introduction, and Data/Methods sections, incorporating current dataset description.
+- Develop Model Architecture section with detailed diagrams, component descriptions (embedding, attention blocks, loss), and justification for foundation model integration.
+- Outline Results section structure (baseline vs. foundation model, ablations, sensitivity) and populate with preliminary metrics.
+- Capture Discussion, Conclusion, and Future Work placeholders; maintain bibliography in BibTeX.
+- Track writing tasks in shared checklist; schedule internal review cadence with Mohammad.
 
-Outputs
-- Aligned hourly dataset with columns (core):
-  - `timestamp`, `site_name`, `comid`, `nwm_cms`, `usgs_cms`, [ERA5 features...], [NLCD features...]
-  - Targets: `y_residual_cms`, `y_corrected_cms`
-- Files: `data/clean/modeling/hourly_training_{start}_{end}.parquet` (+ sample CSV)
+### 4. Visualizations & Figure Production
+- Define figure list for WRR submission (architecture diagram, training workflow, performance comparisons, error distributions, case-study hydrographs).
+- Standardize plotting style (fonts, color palettes, labeling) to meet WRR guidelines and thesis formatting.
+- Automate generation of core plots via `modeling/plot_quick_eval.py` extensions; save to `figures/` with versioning.
+- Draft architecture diagram (e.g., using draw.io or Python graph libs) illustrating hybrid transformer and foundation model components.
+- Prepare table templates (LaTeX + CSV) for metrics and data summaries; validate against WRR column width limits.
 
-Error modes
-- Missing overlaps between sources; network access issues; partial hours
+### 5. Coordination & Logistics
+- Follow up on CV/material exchange with collaborators; store shared documents in project repo or agreed drive.
+- Maintain meeting notes and decision log (e.g., in `docs/meetings/`) for traceability.
+- Update weekly status reports covering model progress, writing, and figure readiness.
 
-Success criteria
-- End-to-end build completes on day/week windows with high coverage and sensible residuals.
+## Deliverables
+- Fine-tuned foundation model checkpoint(s) with accompanying configuration, evaluation reports, and comparison plots.
+- Refreshed hybrid transformer and LSTM benchmark packages (scripts, metrics, inference outputs).
+- Draft WRR manuscript (LaTeX) with completed Abstract, Plain Language Summary, and Methods sections by end of October.
+- Figure bundle (PNG/PDF + source scripts) aligned with manuscript narrative.
+- Updated project documentation (this plan, status logs, experiment tracker).
 
-## Edge Cases
-- Sparse ERA5 (6h) → safe hourly alignment via nearest within 3h (no future leakage)
-- NWM v3.0 occasional gaps → leave NaN; no silent fills
-- Units and timezones → cms conversion and UTC normalization already implemented
+## Timeline (Oct – Nov 2025)
+- **Week of Oct 7 – Oct 13**
+  - Finalize foundation model candidate selection and resource estimates.
+  - Build data adapters/windowing pipelines; rerun hybrid transformer baseline for reference metrics.
+  - Draft Plain Language Summary and manuscript outline in WRR template.
+- **Week of Oct 14 – Oct 20**
+  - Fine-tune foundation model on training set; begin hyperparameter sweeps.
+  - Implement LSTM benchmark refresh and assemble preliminary comparison table.
+  - Populate Data & Methods sections, including detailed architecture description draft.
+- **Week of Oct 21 – Oct 27**
+  - Complete foundation model tuning, run validation/test evaluations, and capture plots.
+  - Draft architecture figure(s) and performance comparison visuals.
+  - Write Results section skeleton with current metrics; note gaps for pending experiments.
+- **Week of Oct 28 – Nov 3**
+  - Conduct ablation/sensitivity checks (e.g., feature subsets, window lengths) if time permits.
+  - Polish figures, ensure reproducible plotting scripts, and integrate into LaTeX.
+  - Expand Discussion/Conclusion drafts; solicit feedback from Mohammad.
+- **Week of Nov 4 – Nov 10**
+  - Address feedback, finalize first full manuscript draft, and prepare submission checklist.
+  - Archive experiment artefacts; update plan based on review outcomes.
+- **Ongoing**
+  - Weekly syncs, CV/material exchanges, and incremental updates to this plan as milestones shift.
 
-## Implementation Steps (near-term)
-1) Data slices
-- Pull CHRTOUT hours for a 7-day window in 2023 and 2022 (v3.0 and v2.1 as available).
-- Ensure corresponding USGS and ERA5 windows exist.
+## Dependencies & Risks
+- **Compute/GPU availability:** Foundation model fine-tuning may require higher VRAM; secure access to cloud or lab resources.
+- **Data completeness:** Ensure NWM/USGS data coverage through 2022; monitor for missing hours or corrupt pulls.
+  - Mitigation: automated QA scripts and reruns for gaps.
+- **Licensing/compliance:** Verify Hugging Face model licensing for academic publication use.
+- **Writing bandwidth:** Balance coding and writing tasks; schedule protected writing blocks.
+- **Visualization tooling:** Confirm access to preferred diagram/plotting tools; budget time for iteration based on supervisor feedback.
 
-2) Build aligned datasets
-- Use `modeling/build_training_dataset.py` to create Parquet outputs for each window.
-- Quick QA: row counts, NaN rates, basic stats.
-
-3) Baseline metrics and plots
-- Implement `modeling/metrics.py` to compute NSE, KGE, RMSE, CC, PBias on NWM vs USGS (pre-correction baseline).
-- Implement `modeling/plots.py` to produce:
-  - Hydrographs (USGS vs NWM),
-  - Residual histograms/density,
-  - Scatter USGS vs NWM with 1:1 line.
-
-4) First model (hourly residual)
-- Start with a compact transformer or temporal CNN that ingests: [NWM, ERA5 features, optional static NLCD].
-- Predict next-step residual; corrected = NWM + residual.
-- Train/val/test split by time; early stopping; simple HPO sweep.
-
-5) Reporting
-- Save metrics tables and plots per site/date window under `data/clean/modeling/` or `reports/`.
-- Document findings and update this plan with learned insights.
-
-## Optional (later)
-- Lead-aware path using operational short_range for recent periods (evaluate per lead)
-- Multi-site model with site embeddings
-- Lightweight web app (FastAPI + simple FE) for browsing sites/windows and downloading corrected series
-
-## How to run (quick)
-- NWM v3.0 CHRTOUT sample (already validated):
-  - `python data_acquisition_scripts/nwm.py --mode retrospective_v3 --start-date 2023-01-01T00:00 --end-date 2023-01-01T05:00 --out-dir data/raw/nwm_v3`
-- Build dataset for that window:
-  - `python modeling/build_training_dataset.py --start 2023-01-01T00:00 --end 2023-01-01T05:00`
-- Next: expand to a 7-day window and run metrics/plots.
-
-- Optimizing NWM V.30 API Calls (Bottleneck in data retrival)
-process-based concurrency
-validate
-build aligned dataset
+## Communication & Next Touchpoints
+- Share weekly progress summary (experiments, writing, visuals) with Mohammad.
+- Notify collaborators once foundation model candidate and compute plan are finalized.
+- Schedule manuscript outline review after Week of Oct 14 – Oct 20 deliverables are drafted.
+- Update this plan after major milestones or if timeline adjustments become necessary.
