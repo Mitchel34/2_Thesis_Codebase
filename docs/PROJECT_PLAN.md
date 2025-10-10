@@ -36,6 +36,12 @@ Owner: Mitchel Carson
 - Reproduce hybrid transformer training runs to establish control metrics with up-to-date data splits and logging.
 - Implement LSTM (and any other reference models already scoped) with consistent preprocessing and evaluation scripts.
   - New script: `modeling/train_quick_lstm_torch.py --data <path>` mirrors the transformer CLI; outputs saved under `data/clean/modeling/` for side-by-side metrics.
+- Integrate a Hugging Face foundation transformer for residual correction.
+  - New script: `modeling/train_hf_foundation.py --data <path>` loads a pre-trained `TimeSeriesTransformer` checkpoint (default `kashif/timeseries-transformer-tourism-hourly`) and fine-tunes it on the hourly residual dataset.
+- Wrap the foundation backbone with Hydra hybrid heads for dual-output corrections.
+  - New script: `modeling/train_hydra_foundation_torch.py --data <path>` composes `HydraFoundationModel` with the same loss stack while optionally freezing the pre-trained encoder.
+- Ship Hydra v2 upgrades (TCN stem, FiLM conditioning, gain/bias + heteroscedastic heads) and validate on the January 2023 quick dataset.
+  - Updated script: `modeling/train_quick_transformer_torch.py --output-prefix hydra_v2_quick` logs Gaussian-NLL losses and writes metrics to `hydra_v2_quick_metrics.json`.
 - Create a comparison matrix summarizing performance across models and sites; flag statistically significant gains.
 - Archive artefacts (models, logs, configs) in versioned storage for reproducibility.
 

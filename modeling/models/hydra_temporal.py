@@ -1,23 +1,68 @@
 import math
-from typing import Iterable, Optional, Tuple
+from typing import Iterable, Optional
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 
 class PositionalEncoding(nn.Module):
+    """Sinusoidal positions enriched with hourly/daily cyclic embeddings."""
+
     def __init__(self, d_model: int, max_len: int = 4096):
         super().__init__()
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float32).unsqueeze(1)
         div_term = torch.exp(torch.arange(0, d_model, 2, dtype=torch.float32) * (-math.log(10000.0) / d_model))
+
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
+
+        hour = (torch.arange(0, max_len, dtype=torch.float32) % 24) / 24.0
+        day = (torch.arange(0, max_len, dtype=torch.float32) % 365) / 365.0
+        hour_term = (2 * math.pi * hour).unsqueeze(1) * div_term
+        day_term = (2 * math.pi * day).unsqueeze(1) * div_term
+
+        pe[:, 0::2] += 0.1 * torch.sin(hour_term) + 0.1 * torch.sin(day_term)
+        pe[:, 1::2] += 0.1 * torch.cos(hour_term) + 0.1 * torch.cos(day_term)
+
         self.register_buffer("pe", pe.unsqueeze(0))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         seq_len = x.size(1)
         return x + self.pe[:, :seq_len]
+
+
+class CausalConv1d(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, dilation: int):
+        super().__init__()
+        self.dilation = dilation
+        self.kernel_size = kernel_size
+        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size, dilation=dilation)
+        self.padding = (kernel_size - 1) * dilation
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = F.pad(x, (self.padding, 0))
+        return self.conv(x)
+
+
+class ResidualTCNBlock(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, dilation: int, dropout: float):
+        super().__init__()
+        self.conv = nn.Sequential(
+            CausalConv1d(in_channels, out_channels, kernel_size, dilation),
+            nn.GELU(),
+            nn.BatchNorm1d(out_channels),
+            nn.Dropout(dropout),
+            CausalConv1d(out_channels, out_channels, kernel_size, dilation),
+            nn.GELU(),
+            nn.BatchNorm1d(out_channels),
+            nn.Dropout(dropout),
+        )
+        self.residual = nn.Conv1d(in_channels, out_channels, 1) if in_channels != out_channels else nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.conv(x) + self.residual(x)
 
 
 class DilatedConvBlock(nn.Module):
@@ -38,8 +83,7 @@ class DilatedConvBlock(nn.Module):
         self.net = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        y = self.net(x.transpose(1, 2)).transpose(1, 2)
-        return y
+        return self.net(x.transpose(1, 2)).transpose(1, 2)
 
 
 class ChannelAttention(nn.Module):
@@ -59,7 +103,7 @@ class ChannelAttention(nn.Module):
 
 
 class HydraTemporalModel(nn.Module):
-    """Hybrid temporal encoder mixing transformer, dilated convolutions, and recent history MLP."""
+    """Hybrid temporal encoder with TCN stem, transformer, and heteroscedastic/gain/quantile heads."""
 
     def __init__(
         self,
@@ -72,11 +116,32 @@ class HydraTemporalModel(nn.Module):
         conv_depth: int = 4,
         dropout: float = 0.1,
         quantiles: Optional[Iterable[float]] = None,
+        nwm_index: int = 0,
+        patch_size: int = 1,
+        gain_scale: float = 0.1,
+        logvar_min: float = -6.0,
+        logvar_max: float = 4.0,
+        moe_experts: int = 1,
     ) -> None:
         super().__init__()
-        self.quantiles = tuple(quantiles) if quantiles is not None else None
+        self.quantiles = tuple(float(q) for q in quantiles) if quantiles else None
+        self.nwm_index = nwm_index
+        self.seq_len = seq_len
+        self.input_dim = input_dim
+        self.d_model = d_model
+        self.gain_scale = gain_scale
+        self.logvar_min = logvar_min
+        self.logvar_max = logvar_max
+        self.num_experts = moe_experts if moe_experts and moe_experts > 1 else 0
 
-        self.input_proj = nn.Linear(input_dim, d_model)
+        dilations = [1, 2, 4, 8][:conv_depth]
+        blocks = []
+        in_ch = input_dim
+        for dilation in dilations:
+            blocks.append(ResidualTCNBlock(in_ch, d_model, kernel_size=3, dilation=dilation, dropout=dropout))
+            in_ch = d_model
+        self.tcn = nn.Sequential(*blocks)
+
         self.positional = PositionalEncoding(d_model, max_len=seq_len + 1)
 
         encoder_layer = nn.TransformerEncoderLayer(
@@ -90,16 +155,15 @@ class HydraTemporalModel(nn.Module):
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
-        self.conv_branch = DilatedConvBlock(d_model, depth=conv_depth, dropout=dropout)
+        self.conv_branch = DilatedConvBlock(d_model, depth=max(2, conv_depth // 2), dropout=dropout)
         self.recent_mlp = nn.Sequential(
-            nn.Linear(d_model, d_model),
+            nn.Linear(d_model + input_dim, d_model),
             nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(d_model, d_model),
         )
         self.channel_attn = ChannelAttention(d_model)
 
-        static_out = 0
         if static_dim > 0:
             self.static_encoder = nn.Sequential(
                 nn.Linear(static_dim, d_model),
@@ -107,9 +171,16 @@ class HydraTemporalModel(nn.Module):
                 nn.GELU(),
                 nn.Dropout(dropout),
             )
+            self.film = nn.Sequential(
+                nn.Linear(static_dim, d_model * 2),
+                nn.GELU(),
+                nn.Linear(d_model * 2, d_model * 2),
+            )
             static_out = d_model
         else:
             self.static_encoder = None
+            self.film = None
+            static_out = 0
 
         fusion_in = d_model * 3 + static_out
         self.fusion = nn.Sequential(
@@ -118,56 +189,97 @@ class HydraTemporalModel(nn.Module):
             nn.LayerNorm(d_model),
         )
 
-        self.head_residual = nn.Sequential(
-            nn.Linear(d_model, d_model // 2),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(d_model // 2, 1),
-        )
+        if self.num_experts:
+            self.residual_experts = nn.ModuleList([nn.Linear(d_model, 1) for _ in range(self.num_experts)])
+            self.corrected_experts = nn.ModuleList([nn.Linear(d_model, 1) for _ in range(self.num_experts)])
+            self.moe_gate = nn.Sequential(
+                nn.Linear(d_model, max(32, d_model // 2)),
+                nn.GELU(),
+                nn.Linear(max(32, d_model // 2), self.num_experts),
+            )
+            self.residual_mean_head = None
+            self.corrected_mean_head = None
+        else:
+            self.residual_mean_head = nn.Linear(d_model, 1)
+            self.corrected_mean_head = nn.Linear(d_model, 1)
+            self.residual_experts = None
+            self.corrected_experts = None
+            self.moe_gate = None
 
-        self.head_corrected = nn.Sequential(
+        self.residual_logvar_head = nn.Linear(d_model, 1)
+        self.corrected_logvar_head = nn.Linear(d_model, 1)
+        self.gainbias_head = nn.Sequential(
             nn.Linear(d_model, d_model // 2),
             nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(d_model // 2, 1),
+            nn.Linear(d_model // 2, 2),
         )
 
         if self.quantiles:
-            self.head_quantiles = nn.Sequential(
-                nn.Linear(d_model, d_model // 2),
-                nn.GELU(),
-                nn.Dropout(dropout),
-                nn.Linear(d_model // 2, len(self.quantiles)),
-            )
+            self.quantile_head = nn.Linear(d_model, len(self.quantiles))
         else:
-            self.head_quantiles = None
+            self.quantile_head = None
 
     def forward(
         self,
         x_seq: torch.Tensor,
         static_feats: Optional[torch.Tensor] = None,
     ) -> dict:
-        seq = self.input_proj(x_seq)
+        seq = self.tcn(x_seq.transpose(1, 2)).transpose(1, 2)
+
+        if self.film is not None and static_feats is not None:
+            gamma_beta = self.film(static_feats)
+            gamma, beta = gamma_beta.chunk(2, dim=-1)
+            seq = seq * (1 + gamma.unsqueeze(1)) + beta.unsqueeze(1)
+
         seq = self.positional(seq)
 
-        trans_out = self.transformer(seq)
+        seq_len = seq.size(1)
+        causal_mask = torch.triu(
+            torch.ones(seq_len, seq_len, device=seq.device, dtype=torch.bool),
+            diagonal=1,
+        )
+        trans_out = self.transformer(seq, mask=causal_mask)
         conv_out = self.conv_branch(seq)
-        recent_out = self.recent_mlp(seq[:, -1, :])
+        recent_input = torch.cat([seq[:, -1, :], x_seq[:, -1, :]], dim=-1)
+        recent_out = self.recent_mlp(recent_input)
+
         trans_out = self.channel_attn(trans_out)[:, -1, :]
         conv_out = conv_out[:, -1, :]
 
         pieces = [trans_out, conv_out, recent_out]
         if self.static_encoder is not None and static_feats is not None:
-            static_vec = self.static_encoder(static_feats)
-            pieces.append(static_vec)
+            pieces.append(self.static_encoder(static_feats))
 
         fused = torch.cat(pieces, dim=-1)
         fused = self.fusion(fused)
 
-        residual = self.head_residual(fused).squeeze(-1)
-        corrected = self.head_corrected(fused).squeeze(-1)
+        if self.num_experts:
+            logits = self.moe_gate(fused)
+            weights = torch.softmax(logits, dim=-1)
+            res_means = torch.stack([layer(fused).squeeze(-1) for layer in self.residual_experts], dim=-1)
+            residual_mean = (weights * res_means).sum(dim=-1)
+            corr_means = torch.stack([layer(fused).squeeze(-1) for layer in self.corrected_experts], dim=-1)
+            corrected_mean_direct = (weights * corr_means).sum(dim=-1)
+        else:
+            residual_mean = self.residual_mean_head(fused).squeeze(-1)
+            corrected_mean_direct = self.corrected_mean_head(fused).squeeze(-1)
 
-        outputs = {"residual": residual, "corrected": corrected}
-        if self.head_quantiles is not None:
-            outputs["quantiles"] = self.head_quantiles(fused)
+        residual_logvar = self.residual_logvar_head(fused).squeeze(-1).clamp(self.logvar_min, self.logvar_max)
+        corrected_logvar = self.corrected_logvar_head(fused).squeeze(-1).clamp(self.logvar_min, self.logvar_max)
+
+        gain_bias = self.gainbias_head(fused)
+        gain = 1.0 + self.gain_scale * torch.tanh(gain_bias[:, 0])
+        bias = gain_bias[:, 1]
+
+        outputs = {
+            "residual_mean": residual_mean,
+            "residual_logvar": residual_logvar,
+            "corrected_mean": corrected_mean_direct,
+            "corrected_logvar": corrected_logvar,
+            "gain": gain,
+            "bias": bias,
+        }
+
+        if self.quantile_head is not None and self.quantiles:
+            outputs["quantiles"] = self.quantile_head(fused)
         return outputs

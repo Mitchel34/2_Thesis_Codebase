@@ -32,20 +32,31 @@
 - Rationale: creating a single, normalized dataset reduces feature-engineering drift and guarantees reproducible experiments across baseline and foundation models.
 
 ## Model Architectures
-### Hybrid Transformer (`modeling/train_quick_transformer_torch.py` + `modeling/models/hydra_temporal.py`)
-- Encoder blends Conv1d patching, sinusoidal + cyclical positional encoding, and transformer layers to capture multi-scale temporal patterns.
-- Dilated convolutional block augments attention with local context while channel attention reweights feature contributions per sequence.
-- Static features (land cover, regulation flag) pass through dedicated projection and fuse with temporal embeddings, supporting site-aware corrections.
-- Dual-head decoder predicts residual correction and direct corrected discharge, with a consistency loss encouraging agreement via `corrected = nwm + residual`.
-- Training uses focal-weighted MSE to emphasize high-flow errors, Ranger/AdamW optimizers, AMP, and early stopping based on validation loss.
-- Motivation: attention improves sensitivity to regime shifts and long-range dependencies beyond what recurrent baselines typically capture.
+### Hybrid Transformer v2 (`modeling/train_quick_transformer_torch.py` + `modeling/models/hydra_temporal.py`)
+- Causal TCN stem with dilated residual blocks feeds a transformer encoder, with channel attention pooling the final sequence state.
+- Static features FiLM-condition the temporal channels while gain+bias heads provide physics-guided corrections on top of the residual path.
+- Residual and corrected outputs include heteroscedastic log-variances and are trained with Gaussian NLL on asinh-transformed targets plus raw-scale consistency losses.
+- Ensemble of direct, residual, and gain+bias corrected streams reduces systematic error and stabilizes high-flow extremes.
+- Motivation: increase capacity and bias control without reworking the data pipeline or resorting to external foundation weights.
 
+### Residual LSTM Baseline (`modeling/train_quick_lstm_torch.py`)
 ### Residual LSTM Baseline (`modeling/train_quick_lstm_torch.py`)
 - Stacked LSTM encoder (configurable depth, bidirectionality) processes normalized dynamic sequences; dropout mitigates overfitting on smaller windows.
 - Optional static-feature projection mirrors the transformer fusion so both models ingest identical information.
 - Dual linear heads output residual and corrected predictions with the same focal/consistency/bias-penalty loss composition for parity with the transformer.
 - Shares data preparation, augmentation, and metric computation paths with the transformer script for reproducible comparisons.
 - Motivation: provides a strong recurrent baseline rooted in hydrologic literature, quantifying the incremental value of transformer mechanisms.
+### Hugging Face Foundation Transformer (`modeling/train_hf_foundation.py`)
+- Loads a pre-trained `TimeSeriesTransformerForPrediction` checkpoint (default `kashif/timeseries-transformer-tourism-hourly`) via the Transformers library and fine-tunes it on residual targets.
+- Uses residual-only context windows (default 168 hours) with teacher forcing and autoregressive generation to produce next-step corrections.
+- Generation outputs residual forecasts that are recombined with NWM baselines to compute corrected flows using the shared hydro metric suite.
+- Provides a reproducible CLI aligned with other training scripts, with outputs saved under `data/clean/modeling/` for direct comparison.
+- Motivation: evaluate whether a general-purpose foundation model can transfer to hydrologic residual correction with limited fine-tuning.
+### Hydra + Foundation Hybrid (`modeling/train_hydra_foundation_torch.py`)
+- Reuses Hydra's convolutional branch, recent-history MLP, channel attention, and dual residual/corrected heads while swapping the internal encoder for a pre-trained `TimeSeriesTransformerModel`.
+- Optional freezing of the backbone allows rapid benchmarking of foundation representations versus fully fine-tuned encoders.
+- Maintains the same focal/consistency training objective, static-feature handling, and artifact outputs to keep comparisons consistent across models.
+- Motivation: test whether combining Hydra's inductive biases with foundation pretraining yields additive gains over either approach alone.
 
 ## Preliminary Results and Discussion
 ### Experiment Setup
@@ -54,9 +65,9 @@
 - Optimization: AdamW (no Ranger available), focal + consistency loss stack, gradient clipping at 1.0, data augmentation enabled for training batches.
 ### Metric Snapshot (Evaluation on 2023-01-28 onward)
 - Raw NWM baseline: RMSE 0.708 cms, MAE 0.588 cms, NSE -7.73, KGE -0.68, PBIAS +8.17%, r = 0.51.
-- Hybrid transformer: RMSE 0.616 cms (12.9% improvement vs. NWM), MAE 0.524 cms, NSE -5.62, KGE -0.23, PBIAS +7.42%, r = 0.40. Residual head RMSE 3.36 cms.
-- Residual LSTM: RMSE 1.351 cms (90.8% worse than NWM), MAE 1.31 cms, NSE -30.81, KGE 0.23, PBIAS +23.57%, r = 0.41. Residual head RMSE 0.95 cms.
+- Hybrid transformer v2: RMSE 0.440 cms (37.9% improvement vs. NWM), MAE 0.332 cms, NSE -2.37, KGE -0.01, PBIAS -3.50%, r = 0.48. Residual RMSE 0.57 cms.
+- Residual LSTM: RMSE 1.351 cms (90.8% worse than NWM), MAE 1.31 cms, NSE -30.81, KGE 0.23, PBIAS +23.57%, r = 0.41. Residual RMSE 0.95 cms.
 ### Interpretation
-- The transformer retains its advantage on short windows: sequence patching + attention stabilise gradients and deliver consistent residual corrections even without mixed precision. The modest RMSE gain despite negative NSE reflects the high volatility of the January flood season; longer training spans will better characterise high-flow tails.
-- The LSTM diverged toward a biased solution (positive residual drift), likely due to heavy-tailed residual targets, shared loss weights, and limited recurrent depth. Hyperparameters tuned for earlier transformer experiments do not translate directly; learning-rate scheduling, stronger regularisation, and possibly longer warmup windows are required.
-- Next revisions: (1) sweep LSTM hidden size/learning rate with gradient clipping tuned for recurrent cores, (2) rebalance residual vs. corrected heads (e.g., lower focal gamma) to reduce bias accumulation, and (3) extend both models to the full 2010–2022 shards to evaluate robustness across hydrologic regimes.
+- Upgraded Hydra v2 cuts RMSE by ~38% versus raw NWM and >25% versus the earlier transformer, with gain/bias fusion shaving systematic error while heteroscedastic NLL dampens noisy high-flow spikes.
+- Residual predictions tighten substantially (RMSE 0.57 cms vs. 3.36 cms previously), feeding more stable corrected flows; the LSTM baseline still overfits to mean bias and needs curriculum/regularisation sweeps.
+- Next steps: scale Hydra v2 to 2010–2022, tune gain scaling and variance clamping, and explore quantile/MoE heads for calibrated uncertainty.

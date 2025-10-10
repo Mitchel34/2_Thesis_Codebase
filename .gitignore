@@ -1,0 +1,26 @@
+# Python caches
+__pycache__/
+*.py[co]
+*.pyo
+
+# Virtual environments / package caches
+.venv/
+.venv_wheels/
+.cache/
+.mplconfig/
+
+# IDE/editor configs
+.vscode/
+.idea/
+
+# Generated data artifacts
+/data/clean/
+/data/raw/
+/results/
+
+# Logs and checkpoints
+/logs/
+*.log
+
+# Misc
+.DS_Store
