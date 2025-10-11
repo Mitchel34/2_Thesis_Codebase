@@ -67,3 +67,44 @@
 - Residual predictions tighten substantially (RMSE 0.57 cms vs. 3.36 cms previously), feeding more stable corrected flows; the LSTM baseline still overfits to mean bias and needs curriculum/regularisation sweeps.
 - Quantile coverage from the 2022 evaluation suggests boosting lower-tail weight (raise quantile_weight or relax logvar_min) while moderating gain_scale/logvar_max to rein in the inflated upper band.
 - Next steps: scale Hydra v2 to 2010–2022, iterate on gain/variance clamps and quantile weighting, and continue exploring MoE heads for calibrated uncertainty.
+
+## Narrative Development
+### Research Focus
+- **Problem framing:** National Water Model (NWM) residuals remain site-specific and regime dependent; correcting them with machine learning requires respecting local hydrology, regulation, and meteorological drivers.
+- **Guiding questions:**
+  1. How do hybrid transformer residual corrections compare to LSTM baselines across distinct hydro-climatic regimes (humid Appalachian, semi-arid Southwest, agricultural Midwest, boreal Northeast, Gulf coastal)?
+  2. Does regulation status (regulated vs. unregulated) influence attainable error reductions or calibration behaviour?
+  3. Can a consistent pipeline—data alignment, training, calibration—generalize across stations without bespoke feature engineering?
+
+### Site Cohorts
+- **Core validation site:** `03479000` Watauga River (Appalachian mixed forest, unregulated) anchors methodology and ablation analysis.
+- **Expansion set:**
+  - `08082500` Clear Fork Brazos River, TX (semi-arid grassland, unregulated) — tests performance under flashy flow and hydrologic scarcity.
+  - `09504000` Oak Creek, AZ (desert shrubland, regulated) — characterizes regulated desert watershed.
+  - `04137500` Au Sable River, MI (Great Lakes mixed forest, unregulated) — cold-season snowmelt and groundwater influence.
+  - `05464500` Cedar River, IA (agricultural, regulated) — nutrient-laden, managed Midwest river.
+  - `01034500` Penobscot River, ME (boreal transition, regulated) — northern snowmelt with dam operations.
+  - `09234500` Green River, WY (intermountain, regulated) — high-elevation snowpack regime.
+  - `08030500` Sabine River, TX/LA (Gulf coastal, regulated) — hurricane-prone, tidal influence.
+  - `08279500` Rio Grande at Embudo, NM (arid/semi-arid, regulated) — monsoon vs. snowmelt interplay.
+  - `06807000` Missouri River at Nebraska City, NE (Great Plains, regulated) — major stem with flood-control operations.
+  - `05420500` Mississippi River at Clinton, IA (agricultural, regulated) — large basin with levee management.
+  - `01031500` Piscataquis River, ME (boreal transition, unregulated) — contrasting unregulated northeastern catchment.
+
+### Comparative Experiment Plan
+- **Per-site training:**
+  - Reuse `modeling/train_quick_transformer_torch.py` and `modeling/train_quick_lstm_torch.py` with station-specific filters and identical hyperparameters for baseline comparison.
+  - Store artifacts under `data/clean/modeling/<usgs_id>/` with shared metrics schema to simplify aggregation.
+- **Metrics & diagnostics:**
+  - Compute RMSE/MAE/NSE/KGE/PBIAS/ρ for raw NWM, Hydra, LSTM at validation and holdout periods.
+  - Generate calibration outputs (coverage, PIT, reliability) for Hydra quantile runs.
+- **Aggregation:**
+  - Summarize improvements by biome and regulation class to test hypotheses about regime sensitivity.
+  - Highlight exemplar hydrographs for contrasting behaviours (e.g., snowmelt-driven vs. flash flood regimes).
+
+### Narrative Arc
+1. **Motivation:** NWM residual biases impede decision-making; site-aware ML corrections aim to bridge physics and data-driven models.
+2. **Methodology:** Consistent, leakage-safe pipeline with transformer vs. LSTM baselines ensures fair comparison; per-site training underscores operational viability.
+3. **Results:** Present comparative metrics and plots across stations, emphasizing common gains (RMSE reductions) and regime-specific challenges (e.g., regulated flood-control sites).
+4. **Discussion:** Interpret why Hydra generalizes better (attention, FiLM conditioning) and where it struggles (regulation changes, tidal influence); connect to hydrologic theory.
+5. **Implications:** Outline deployment strategy (web app, reproducible scripts) and future research (multi-task models, foundation-model revisit once data contract stabilized).
