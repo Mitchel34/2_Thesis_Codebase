@@ -108,3 +108,29 @@
 3. **Results:** Present comparative metrics and plots across stations, emphasizing common gains (RMSE reductions) and regime-specific challenges (e.g., regulated flood-control sites).
 4. **Discussion:** Interpret why Hydra generalizes better (attention, FiLM conditioning) and where it struggles (regulation changes, tidal influence); connect to hydrologic theory.
 5. **Implications:** Outline deployment strategy (web app, reproducible scripts) and future research (multi-task models, foundation-model revisit once data contract stabilized).
+
+### Scope and Site Strategy
+- **Representative subset vs. full cohort:**
+  - Start with **6 focal stations** spanning major regime classes to keep experimentation tractable while showcasing diversity: `03479000` (Appalachian unregulated), `08082500` (semi-arid unregulated), `09504000` (regulated desert), `01034500` (boreal regulated), `05464500` (agricultural regulated), `08279500` (arid regulated).
+  - Reserve the remaining sites as stretch targets or validation-only checks; they can become supplementary material once the core narrative is stable.
+- **Watershed-level framing:** Anchor methodology in the Watauga River where you already have deep diagnostics, then zoom out to the cross-biome comparison to demonstrate portability of the pipeline.
+- **Deliverable implication:** Each focal station gets Hydra vs. LSTM training runs, calibration diagnostics, and focal hydrographs; aggregated results summarize biome/regulation patterns.
+
+### Hypotheses
+1. **Primary:** Hydra v2 residual correction yields consistent RMSE/NSE improvements over raw NWM and LSTM baselines across diverse hydro-climatic regimes because its FiLM-conditioned transformer better encodes joint meteorological–static context.
+2. **Secondary:** Magnitude of improvement depends on regulation status and biome; unregulated basins in humid climates benefit most, while heavily regulated or tidal-influenced systems show attenuated gains without additional regime-specific features.
+3. **Uncertainty:** Quantile-aware Hydra heads can achieve near-nominal coverage (±5%) after calibration, providing more reliable interval forecasts than LSTM baselines.
+
+### Supporting Literature & Positioning
+- **Han & Morrison (2022)** – Demonstrated LSTM sequence-to-sequence post-processing improving short-lead NWM runoff predictions in the Russian River basin by explicitly modeling forecast errors. Provides precedent for residual learning and evaluation metrics (CC, NSE, PBIAS, RMSE).
+- **Frame et al. (2020)** – Trained LSTMs to post-process NWM nationwide across 531 basins; reported broad accuracy gains and improved hydrologic signatures, underscoring the viability of large-sample residual correction.
+- **Kao et al. (2020)** – Showed encoder–decoder LSTM reduced multi-step flood RMSE by up to 38% for Taiwanese reservoir inflows, motivating the transformer/LSTM comparison for longer forecasts.
+- **Kratzert et al. (2019)** – Established that data-driven sequence models can generalize across CAMELS basins when fed standardized meteorological and static inputs, supporting the multi-site design.
+- **Abebe & Price (2003)** and follow-on machine learning uncertainty studies – Early evidence that modeling hydrologic errors with ANNs/random forests reduces bias and uncertainty, framing Hydra as a modern continuation with attention mechanisms.
+
+### Narrative Enhancements to Develop
+- Introduce a brief **Related Work** section in the manuscript summarizing the above references and highlighting how Hydra advances residual correction (attention + FiLM + heteroscedastic outputs).
+- Add **case-study vignettes**: e.g., heavy rain-on-snow event in Watauga vs. monsoon pulse on the Rio Grande to humanize results for non-technical readers.
+- Document **calibration storyline**: show how coverage diagnostics, PIT histograms, and gain-scale tuning evolve from Watauga to other regimes.
+- Incorporate **operational relevance**: tie improvements to potential decisions (earlier flood warnings, reservoir releases) for regulated vs. unregulated basins.
+- Plan **appendix tables** summarizing site metadata (biome, drainage area, regulation, data availability) to contextualize site selection.
