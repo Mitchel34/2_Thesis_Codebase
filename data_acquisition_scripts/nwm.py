@@ -37,13 +37,17 @@ import logging
 import sys
 import argparse
 from datetime import datetime, timedelta
-from typing import Optional, List
+from typing import Optional, List, Tuple
 import warnings
 warnings.filterwarnings('ignore')
 import tempfile
 import requests
 import time
 import concurrent.futures as cf
+try:  # optional dependency for full_physics .comp files (zstd compression)
+    import zstandard as zstd
+except ImportError:  # pragma: no cover
+    zstd = None
 try:
     import s3fs  # for fast, anonymous S3 access
 except Exception:  # pragma: no cover
@@ -69,6 +73,34 @@ def _finalize_hourly_frame(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]
         df['hour'] = df['timestamp'].dt.hour.astype(int)
     return df
 
+# Retrospective storage switch point (compressed full_physics from Feb 2023 onward)
+RETRO_FULL_PHYSICS_START = pd.Timestamp('2023-02-01 00:00:00')
+
+
+def _chrout_key_candidates(ts: pd.Timestamp) -> List[Tuple[str, bool]]:
+    """Return list of (key, is_comp) candidates for a given timestamp."""
+    base = f"{ts:%Y%m%d%H%M}.CHRTOUT_DOMAIN1"
+    if ts >= RETRO_FULL_PHYSICS_START:
+        return [
+            (f"full_physics/{base}.comp", True),
+            (f"CONUS/netcdf/CHRTOUT/{ts:%Y}/{base}", False),
+        ]
+    return [(f"CONUS/netcdf/CHRTOUT/{ts:%Y}/{base}", False)]
+
+
+def _decompress_comp(src_path: str, dst_path: str) -> str:
+    """Decompress a .comp file (zstd) to NetCDF; returns output path."""
+    if zstd is None:
+        raise RuntimeError(
+            "zstandard package required to read NWM full_physics .comp files. "
+            "Install via `pip install zstandard`."
+        )
+    dctx = zstd.ZstdDecompressor()
+    with open(src_path, 'rb') as src, open(dst_path, 'wb') as dst:
+        dctx.copy_stream(src, dst)
+    return dst_path
+
+
 # ---- Process-safe worker for CHRTOUT hour fetch ----
 def _fetch_chrout_hour_worker(args):
     """
@@ -79,7 +111,7 @@ def _fetch_chrout_hour_worker(args):
     """
     bucket, ts_iso, study_sites = args
     ts = pd.Timestamp(ts_iso)
-    key = f"CONUS/netcdf/CHRTOUT/{ts:%Y}/{ts:%Y%m%d%H%M}.CHRTOUT_DOMAIN1"
+    candidates = _chrout_key_candidates(ts)
     # Try boto3 head + download to local temp, then open with h5netcdf (reads minimal data per file)
     from botocore.config import Config as _Cfg
     from botocore import UNSIGNED as _UNS
@@ -90,16 +122,30 @@ def _fetch_chrout_hour_worker(args):
     import tempfile as _tempfile
     try:
         s3c = _boto3.client('s3', region_name='us-east-1', config=_Cfg(signature_version=_UNS))
-        try:
-            s3c.head_object(Bucket=bucket, Key=key)
-        except Exception:
+        key = None
+        is_comp = False
+        for cand, is_comp_cand in candidates:
+            try:
+                s3c.head_object(Bucket=bucket, Key=cand)
+                key = cand
+                is_comp = is_comp_cand
+                break
+            except Exception:
+                continue
+        if key is None:
             return []
         tmp_dir = _tempfile.mkdtemp(prefix="nwm_v3_proc_")
         tmp_file = _os.path.join(tmp_dir, _os.path.basename(key))
+        nc_path = None
         try:
             s3c.download_file(bucket, key, tmp_file)
+            if is_comp:
+                nc_path = tmp_file + '.nc'
+                _decompress_comp(tmp_file, nc_path)
+            else:
+                nc_path = tmp_file
             # Use default engine (netCDF4) as in the previously working code path
-            with _xr.open_dataset(tmp_file) as ds:
+            with _xr.open_dataset(nc_path) as ds:
                 if 'feature_id' not in ds or 'streamflow' not in ds:
                     return []
                 feature_ids = _np.array(ds['feature_id'].values)
@@ -122,6 +168,8 @@ def _fetch_chrout_hour_worker(args):
                 return out
         finally:
             try:
+                if nc_path and _os.path.exists(nc_path) and nc_path != tmp_file:
+                    _os.remove(nc_path)
                 if _os.path.exists(tmp_file):
                     _os.remove(tmp_file)
                 _os.rmdir(tmp_dir)
@@ -252,11 +300,18 @@ class NWMHourlyCollector:
         logger.info(f"⏰ Hourly coverage (unique hours): {hrs}")
         return df
 
-    def collect_v3_hourly_auto(self, start_date: str, end_date: str, **kwargs) -> Optional[pd.DataFrame]:
+    def collect_v3_hourly_auto(
+        self,
+        start_date: str,
+        end_date: str,
+        archive_base_url: Optional[str] = None,
+        **kwargs,
+    ) -> Optional[pd.DataFrame]:
         """Auto-stitch hourly streamflow across Jan→Feb 2023 boundary.
 
         - Up to 2023-01-31T23:00Z: retrospective v3.0 CHRTOUT
         - From 2023-02-01T00:00Z onward: analysis_assim tm00
+        - Optional HTTP archive fallback when analysis_assim objects are no longer on S3
         """
         start_dt = pd.to_datetime(start_date)
         end_dt = pd.to_datetime(end_date)
@@ -279,6 +334,30 @@ class NWMHourlyCollector:
             assim = self.collect_analysis_assim_hourly_streamflow(sub_start, end_dt)
             if assim is not None:
                 frames.append(assim)
+            elif archive_base_url:
+                logger.info(
+                    "⚠️  analysis_assim dataset unavailable; attempting archive fallback via %s",
+                    archive_base_url,
+                )
+                archive_df = self.collect_hourly_archive_data(
+                    start_date=sub_start,
+                    end_date=end_dt,
+                    base_url=archive_base_url,
+                )
+                if archive_df is not None:
+                    frames.append(archive_df)
+                else:
+                    logger.warning(
+                        "⚠️  Archive fallback also returned no data for %s → %s",
+                        sub_start,
+                        end_dt,
+                    )
+            else:
+                logger.warning(
+                    "⚠️  analysis_assim dataset unavailable for %s → %s; provide --archive-base-url to try HTTP archive fallback",
+                    sub_start,
+                    end_dt,
+                )
 
         if not frames:
             logger.error("❌ Auto v3 hourly collector produced no data for the requested window")
@@ -613,6 +692,11 @@ class NWMHourlyCollector:
         end_dt = pd.to_datetime(end_date)
         if end_dt < start_dt:
             raise ValueError("end_date must be after start_date")
+        if end_dt >= RETRO_FULL_PHYSICS_START and zstd is None:
+            raise RuntimeError(
+                "zstandard package required to read NWM retrospective full_physics (.comp) files. "
+                "Install via `pip install zstandard` and retry."
+            )
 
         logger.info("🚀 COLLECTING RETROSPECTIVE v3.0 (2021–2023) CHRTOUT - HOURLY")
         logger.info("=" * 70)
@@ -650,88 +734,102 @@ class NWMHourlyCollector:
             except Exception:
                 fs = None
 
-        def s3_key_for(ts: pd.Timestamp) -> str:
-            return f"CONUS/netcdf/CHRTOUT/{ts:%Y}/{ts:%Y%m%d%H%M}.CHRTOUT_DOMAIN1"
-
         def fetch_one(ts: pd.Timestamp):
-            key = s3_key_for(ts)
-            s3url = f"s3://{bucket}/{key}"
-            # Fast path: open via s3fs+h5netcdf without full download
+            candidates = _chrout_key_candidates(ts)
+            # First, if s3fs available, try netcdf variant directly (only works for non-comp)
             if fs is not None:
-                try:
-                    if not fs.exists(f"{bucket}/{key}"):
-                        return []
-                    ds = xr.open_dataset(
-                        s3url,
-                        engine="h5netcdf",
-                        backend_kwargs={"storage_options": {"anon": True}},
-                        chunks={},  # minimal
-                    )
-                    if 'feature_id' not in ds or 'streamflow' not in ds:
-                        return []
-                    feature_ids = np.asarray(ds['feature_id'].values)
-                    values = np.asarray(ds['streamflow'].values)
-                    out = []
-                    for site in self.study_sites:
-                        comid = site['comid']
-                        site_name = site['name']
-                        idx = np.where(feature_ids == comid)[0]
-                        if idx.size:
-                            out.append({
-                                'timestamp': pd.Timestamp(ts),
-                                'site_name': site_name,
-                                'comid': comid,
-                                'streamflow_cms': float(values[int(idx[0])]),
-                                'data_source': 'retrospective_v3p0_hourly',
-                                'hour': int(ts.hour),
-                                'file': key,
-                            })
-                    return out
-                except Exception:
-                    # Fallback to boto3 local download
-                    pass
+                for key, is_comp in candidates:
+                    if is_comp:
+                        continue
+                    try:
+                        if not fs.exists(f"{bucket}/{key}"):
+                            continue
+                        s3url = f"s3://{bucket}/{key}"
+                        ds = xr.open_dataset(
+                            s3url,
+                            engine="h5netcdf",
+                            backend_kwargs={"storage_options": {"anon": True}},
+                            chunks={},
+                        )
+                        if 'feature_id' not in ds or 'streamflow' not in ds:
+                            ds.close()
+                            continue
+                        feature_ids = np.asarray(ds['feature_id'].values)
+                        values = np.asarray(ds['streamflow'].values)
+                        out = []
+                        for site in self.study_sites:
+                            comid = site['comid']
+                            site_name = site['name']
+                            idx = np.where(feature_ids == comid)[0]
+                            if idx.size:
+                                out.append({
+                                    'timestamp': pd.Timestamp(ts),
+                                    'site_name': site_name,
+                                    'comid': comid,
+                                    'streamflow_cms': float(values[int(idx[0])]),
+                                    'data_source': 'retrospective_v3p0_hourly',
+                                    'hour': int(ts.hour),
+                                    'file': key,
+                                })
+                        ds.close()
+                        if out:
+                            return out
+                    except Exception:
+                        continue
 
-            # Fallback path: download file then open locally
-            try:
-                self.s3_client.head_object(Bucket=bucket, Key=key)
-            except Exception:
-                return []
-            tmp_file = None
-            try:
-                tmp_dir = tempfile.mkdtemp(prefix="nwm_v3_dl_")
-                tmp_file = os.path.join(tmp_dir, os.path.basename(key))
-                self.s3_client.download_file(bucket, key, tmp_file)
-                with xr.open_dataset(tmp_file) as ds:
-                    if 'feature_id' not in ds or 'streamflow' not in ds:
-                        return []
-                    feature_ids = np.array(ds['feature_id'].values)
-                    values = np.array(ds['streamflow'].values)
-                    out = []
-                    for site in self.study_sites:
-                        comid = site['comid']
-                        site_name = site['name']
-                        match = np.where(feature_ids == comid)[0]
-                        if match.size:
-                            out.append({
-                                'timestamp': pd.Timestamp(ts),
-                                'site_name': site_name,
-                                'comid': comid,
-                                'streamflow_cms': float(values[int(match[0])]),
-                                'data_source': 'retrospective_v3p0_hourly',
-                                'hour': int(ts.hour),
-                                'file': key,
-                            })
-                    return out
-            except Exception:
-                return []
-            finally:
+            # Fallback: download candidate, optionally decompress, then open
+            for key, is_comp in candidates:
                 try:
-                    if tmp_file and os.path.exists(tmp_file):
-                        os.remove(tmp_file)
-                    if 'tmp_dir' in locals():
-                        os.rmdir(tmp_dir)
+                    self.s3_client.head_object(Bucket=bucket, Key=key)
                 except Exception:
-                    pass
+                    continue
+                tmp_file = None
+                nc_path = None
+                try:
+                    tmp_dir = tempfile.mkdtemp(prefix="nwm_v3_dl_")
+                    tmp_file = os.path.join(tmp_dir, os.path.basename(key))
+                    self.s3_client.download_file(bucket, key, tmp_file)
+                    if is_comp:
+                        nc_path = tmp_file + '.nc'
+                        _decompress_comp(tmp_file, nc_path)
+                        open_path = nc_path
+                    else:
+                        open_path = tmp_file
+                    with xr.open_dataset(open_path) as ds:
+                        if 'feature_id' not in ds or 'streamflow' not in ds:
+                            continue
+                        feature_ids = np.array(ds['feature_id'].values)
+                        values = np.array(ds['streamflow'].values)
+                        out = []
+                        for site in self.study_sites:
+                            comid = site['comid']
+                            site_name = site['name']
+                            match = np.where(feature_ids == comid)[0]
+                            if match.size:
+                                out.append({
+                                    'timestamp': pd.Timestamp(ts),
+                                    'site_name': site_name,
+                                    'comid': comid,
+                                    'streamflow_cms': float(values[int(match[0])]),
+                                    'data_source': 'retrospective_v3p0_hourly',
+                                    'hour': int(ts.hour),
+                                    'file': key,
+                                })
+                        if out:
+                            return out
+                except Exception:
+                    continue
+                finally:
+                    try:
+                        if nc_path and os.path.exists(nc_path):
+                            os.remove(nc_path)
+                        if tmp_file and os.path.exists(tmp_file):
+                            os.remove(tmp_file)
+                        if 'tmp_dir' in locals():
+                            os.rmdir(tmp_dir)
+                    except Exception:
+                        pass
+            return []
 
         # Concurrent fetch and periodic checkpoint writes
         rows: List[dict] = []
@@ -945,6 +1043,7 @@ def main():
             v3a = collector.collect_v3_hourly_auto(
                 start_date=args.start_date,
                 end_date=args.end_date,
+                archive_base_url=args.archive_base_url,
                 max_workers=args.max_workers,
                 checkpoint_every=args.checkpoint_every,
                 resume=args.resume,

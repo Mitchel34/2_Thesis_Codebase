@@ -1,110 +1,99 @@
-# Project Plan: Foundation Model Extension for Hourly NWM Corrections
+# Project Plan: Hydra Enhancements for Hourly NWM Corrections
 
 Date: 2025-10-07
 Owner: Mitchel Carson
 
 ## Summary
-- Hybrid transformer baseline trained on NWM 2010–2020 with 2021 validation achieves ~10% RMSE improvement against raw NWM; serves as control experiment.
-- Next milestone is integrating a Hugging Face foundation model to push accuracy further and benchmark against LSTM and other baselines.
-- Parallel effort required to draft Water Resources Research (WRR) manuscript, document architecture decisions, and produce publication-ready visuals.
+- Hybrid transformer (Hydra v2) trained on NWM 2010–2020 with 2021 validation delivers ~10% RMSE improvement versus raw NWM; serves as current control experiment.
+- Next milestone focuses on stabilizing Hydra v2 across full 2010–2022 runs, tightening calibration, and strengthening the LSTM baseline for comparative analysis.
+- Work on Water Resources Research (WRR) manuscript, thesis narrative, and publication-grade visuals proceeds in parallel.
 - Coordination items (plain language summary, CV/material sharing) remain active alongside technical execution.
 
 ## Objectives
-- Adapt and fine-tune a suitable time series foundation model on the hourly NWM/USGS residual dataset and quantify gains versus the hybrid transformer and LSTM baselines.
-- Maintain a reproducible experiment stack (data prep, configs, checkpoints, metrics) to support thesis defensibility and manuscript requirements.
-- Draft the WRR-format paper, emphasizing the model architecture, methodology, results, and plain-language summary.
-- Create high-quality visualizations (plots, tables, architecture diagrams) that align with WRR submission standards and thesis deliverables.
-- Track collaborative tasks (e.g., CV exchange, template alignment) to keep stakeholders informed.
+- Finalize Hydra v2 configuration (gain/bias head, heteroscedastic outputs, quantiles) and document reproducible training/evaluation pipelines.
+- Tune and validate the LSTM baseline to provide a credible comparison point for Hydra improvements.
+- Maintain a reproducible experiment stack (data prep, configs, checkpoints, metrics) that supports thesis defensibility and manuscript requirements.
+- Draft the WRR-format paper, emphasizing model architecture, methodology, results, and accessible narrative.
+- Produce high-quality visualizations (plots, tables, diagrams) aligned with WRR and thesis deliverables while tracking collaborative tasks.
 
 ## Current Status Snapshot
 - Data pipeline produces aligned hourly datasets (2010–2022) for training/validation/testing; residual labels verified.
-- Hybrid transformer implementation operational in PyTorch (`modeling/train_quick_transformer_torch.py`) with quick-eval tooling.
-- Early analysis shows ~10% RMSE improvement on 2021 validation relative to raw NWM baselines.
+- Hydra v2 implementation (`modeling/train_quick_transformer_torch.py`) is operational with quick-eval tooling.
+- First full-run Hydra v2 sweep (#1) trained on 2010–2022 with 2022 evaluation delivers 65% RMSE reduction versus NWM (gain_scale=0.05, logvar clamp [-4, 2], quantile weight 0.1); lower tails are under-covered (q10≈0%) while q90 over-covers (≈100%), signalling calibration work.
+- LSTM baseline script exists but requires hyperparameter sweeps to avoid divergence and to match Hydra preprocessing.
 - WRR LaTeX template identified; outline discussions established (four-author format, title flexibility).
-- Visual assets currently limited to diagnostic plots; publication-grade figures outstanding.
+- Visual assets are limited to diagnostic plots; publication-grade figures outstanding.
 
 ## Workstreams & Key Tasks
 
-### 1. Foundation Model Integration
-- Identify candidate Hugging Face models (e.g., TimeGPT, Chronos, Temporal Fusion Transformer variants) and assess licensing, input requirements, and computational demands.
-- Prototype data adapters to map hourly residual sequences into the foundation model format (windowing, feature scaling, static metadata handling).
-- Fine-tune chosen model on 2010–2020 training data with 2021 validation; log checkpoints, configuration files, and training curves.
-- Run comparative inference on 2022 test data; capture RMSE/NSE/KGE/PBias and qualitative diagnostics.
-- Document findings and decision rationale for inclusion in thesis and paper.
+### 1. Hydra v2 Finalization & Calibration
+- Run targeted sweeps over gain_scale (0.03–0.08), log-variance clamps, dropout, and quantile weights using quick and full data splits.
+- Analyse calibration diagnostics (coverage, PIT, CRPS) and adjust heteroscedastic heads to achieve nominal quantile coverage.
+- Document final configuration, training schedule, and metrics; archive checkpoints and logs for reproducibility.
 
 ### 2. Baseline Refresh & Comparative Benchmarks
-- Reproduce hybrid transformer training runs to establish control metrics with up-to-date data splits and logging.
-- Implement LSTM (and any other reference models already scoped) with consistent preprocessing and evaluation scripts.
-  - New script: `modeling/train_quick_lstm_torch.py --data <path>` mirrors the transformer CLI; outputs saved under `data/clean/modeling/` for side-by-side metrics.
-- Integrate a Hugging Face foundation transformer for residual correction.
-  - New script: `modeling/train_hf_foundation.py --data <path>` loads a pre-trained `TimeSeriesTransformer` checkpoint (default `kashif/timeseries-transformer-tourism-hourly`) and fine-tunes it on the hourly residual dataset.
-- Wrap the foundation backbone with Hydra hybrid heads for dual-output corrections.
-  - New script: `modeling/train_hydra_foundation_torch.py --data <path>` composes `HydraFoundationModel` with the same loss stack while optionally freezing the pre-trained encoder.
-- Ship Hydra v2 upgrades (TCN stem, FiLM conditioning, gain/bias + heteroscedastic heads) and validate on the January 2023 quick dataset.
-  - Updated script: `modeling/train_quick_transformer_torch.py --output-prefix hydra_v2_quick` logs Gaussian-NLL losses and writes metrics to `hydra_v2_quick_metrics.json`.
-- Create a comparison matrix summarizing performance across models and sites; flag statistically significant gains.
-- Archive artefacts (models, logs, configs) in versioned storage for reproducibility.
+- Reproduce Hydra v2 quick-run for sanity checks prior to full sweeps.
+- Tune `modeling/train_quick_lstm_torch.py` (hidden size, depth, LR schedule, warmup) to stabilise training and beat NWM baseline.
+- Compute comparative metrics (RMSE, MAE, NSE, KGE, PBIAS, correlation) across validation and holdout periods for Hydra vs. LSTM vs. NWM.
+- Maintain experiment tracker summarizing hyperparameters, seeds, and outcomes.
 
 ### 3. WRR Paper Draft (LaTeX)
-- Set up WRR template repository/workspace, confirm author order, and update metadata (title, affiliations).
-- Draft Plain Language Summary, Introduction, and Data/Methods sections, incorporating current dataset description.
-- Develop Model Architecture section with detailed diagrams, component descriptions (embedding, attention blocks, loss), and justification for foundation model integration.
-- Outline Results section structure (baseline vs. foundation model, ablations, sensitivity) and populate with preliminary metrics.
-- Capture Discussion, Conclusion, and Future Work placeholders; maintain bibliography in BibTeX.
-- Track writing tasks in shared checklist; schedule internal review cadence with Mohammad.
+- Set up WRR template workspace, confirm author order, and update metadata (title, affiliations).
+- Draft Plain Language Summary, Introduction, and Data/Methods sections with emphasis on the hydrologic context and transformer architecture.
+- Detail model components (TCN stem, FiLM conditioning, gain/bias head, heteroscedastic loss) with equations and narrative explanation.
+- Outline Results/Discussion structure using current metrics; identify gaps requiring additional experiments.
+- Maintain bibliography via BibTeX and track writing tasks in a shared checklist.
 
-### 4. Visualizations & Figure Production
-- Define figure list for WRR submission (architecture diagram, training workflow, performance comparisons, error distributions, case-study hydrographs).
-- Standardize plotting style (fonts, color palettes, labeling) to meet WRR guidelines and thesis formatting.
-- Automate generation of core plots via `modeling/plot_quick_eval.py` extensions; save to `figures/` with versioning.
-- Draft architecture diagram (e.g., using draw.io or Python graph libs) illustrating hybrid transformer and foundation model components.
-- Prepare table templates (LaTeX + CSV) for metrics and data summaries; validate against WRR column width limits.
+### 4. Visualization & Figure Production
+- Define figure list for WRR submission (architecture diagram, workflow overview, performance comparisons, residual distributions, case-study hydrographs, station maps).
+- Standardize plotting style (fonts, colour palettes, labelling) to satisfy WRR/thesis guidelines.
+- Extend `modeling/plot_quick_eval.py` and `modeling/generate_model_improvement_plots.py` to export publication-ready PDFs with consistent styling.
+- Produce Taylor diagrams, reliability plots, and PIT histograms to support calibration analysis.
+- Prepare table templates (LaTeX + CSV) for metrics and data summaries; validate formatting against WRR constraints.
 
 ### 5. Coordination & Logistics
-- Follow up on CV/material exchange with collaborators; store shared documents in project repo or agreed drive.
-- Maintain meeting notes and decision log (e.g., in `docs/meetings/`) for traceability.
-- Update weekly status reports covering model progress, writing, and figure readiness.
+- Follow up on CV/material exchange with collaborators; store documents in agreed location.
+- Maintain meeting notes and decision log (e.g., under `docs/meetings/`) for traceability.
+- Share weekly status reports covering progress on modeling, writing, and figure production.
 
 ## Deliverables
-- Fine-tuned foundation model checkpoint(s) with accompanying configuration, evaluation reports, and comparison plots.
-- Refreshed hybrid transformer and LSTM benchmark packages (scripts, metrics, inference outputs).
-- Draft WRR manuscript (LaTeX) with completed Abstract, Plain Language Summary, and Methods sections by end of October.
-- Figure bundle (PNG/PDF + source scripts) aligned with manuscript narrative.
+- Hydra v2 “run of record” with configuration files, checkpoints, and evaluation metrics.
+- Tuned LSTM baseline with documented hyperparameters, training curves, and comparison metrics.
+- WRR manuscript draft containing Plain Language Summary, Data, Methods, and initial Results sections.
+- Figure bundle (PDF/PNG + generation scripts) aligned with manuscript narrative.
 - Updated project documentation (this plan, status logs, experiment tracker).
 
 ## Timeline (Oct – Nov 2025)
 - **Week of Oct 7 – Oct 13**
-  - Finalize foundation model candidate selection and resource estimates.
-  - Build data adapters/windowing pipelines; rerun hybrid transformer baseline for reference metrics.
+  - Complete Hydra v2 quick-run regression tests; schedule calibration sweep.
   - Draft Plain Language Summary and manuscript outline in WRR template.
 - **Week of Oct 14 – Oct 20**
-  - Fine-tune foundation model on training set; begin hyperparameter sweeps.
-  - Implement LSTM benchmark refresh and assemble preliminary comparison table.
-  - Populate Data & Methods sections, including detailed architecture description draft.
+  - Execute Hydra v2 calibration sweeps; log coverage diagnostics.
+  - Tune LSTM baseline and assemble preliminary comparison table.
+  - Populate Data & Methods sections with current architecture description.
 - **Week of Oct 21 – Oct 27**
-  - Complete foundation model tuning, run validation/test evaluations, and capture plots.
-  - Draft architecture figure(s) and performance comparison visuals.
-  - Write Results section skeleton with current metrics; note gaps for pending experiments.
+  - Finalise Hydra v2 configuration on full dataset; export metrics/plots.
+  - Draft architecture diagrams and performance comparison visuals.
+  - Write Results section skeleton with existing metrics; note pending experiments.
 - **Week of Oct 28 – Nov 3**
-  - Conduct ablation/sensitivity checks (e.g., feature subsets, window lengths) if time permits.
+  - Conduct ablation/sensitivity checks (feature subsets, sequence length) if time permits.
   - Polish figures, ensure reproducible plotting scripts, and integrate into LaTeX.
   - Expand Discussion/Conclusion drafts; solicit feedback from Mohammad.
 - **Week of Nov 4 – Nov 10**
-  - Address feedback, finalize first full manuscript draft, and prepare submission checklist.
-  - Archive experiment artefacts; update plan based on review outcomes.
+  - Address feedback, finalise first full manuscript draft, and prepare submission checklist.
+  - Archive experiment artefacts; update plan post-review as needed.
 - **Ongoing**
-  - Weekly syncs, CV/material exchanges, and incremental updates to this plan as milestones shift.
+  - Weekly syncs, CV/material exchanges, and incremental plan updates as milestones shift.
 
 ## Dependencies & Risks
-- **Compute/GPU availability:** Foundation model fine-tuning may require higher VRAM; secure access to cloud or lab resources.
-- **Data completeness:** Ensure NWM/USGS data coverage through 2022; monitor for missing hours or corrupt pulls.
+- **Compute/GPU availability:** Hydra sweeps require reliable GPU resources; secure access for overnight runs.
+- **Data completeness:** Ensure NWM/USGS coverage through 2022; monitor for missing hours or corrupt pulls.
   - Mitigation: automated QA scripts and reruns for gaps.
-- **Licensing/compliance:** Verify Hugging Face model licensing for academic publication use.
+- **Overfitting risks:** Use validation monitoring, early stopping, and dropout/weight decay to prevent overfitting on limited station data.
 - **Writing bandwidth:** Balance coding and writing tasks; schedule protected writing blocks.
-- **Visualization tooling:** Confirm access to preferred diagram/plotting tools; budget time for iteration based on supervisor feedback.
+- **Visualization tooling:** Confirm access to diagramming/plotting tools; budget iteration time for supervisor feedback.
 
 ## Communication & Next Touchpoints
-- Share weekly progress summary (experiments, writing, visuals) with Mohammad.
-- Notify collaborators once foundation model candidate and compute plan are finalized.
+- Share weekly progress summaries (experiments, writing, visuals) with Mohammad.
 - Schedule manuscript outline review after Week of Oct 14 – Oct 20 deliverables are drafted.
-- Update this plan after major milestones or if timeline adjustments become necessary.
+- Update this plan following major milestones or timeline adjustments.

@@ -1,0 +1,95 @@
+%% To submit your paper:
+\documentclass[draft]{agujournal2019}
+\usepackage{url}
+\usepackage{lineno}
+\usepackage[inline]{trackchanges}
+\usepackage{soul}
+\linenumbers
+
+\draftfalse
+
+\journalname{Water Resources Research}
+
+\begin{document}
+
+\title{Site-Aware Residual Corrections to National Water Model Streamflow Using Hybrid Transformers and Recurrent Baselines}
+
+\authors{[Mitchel Carson]\affil{1}, [Author Two]\affil{1,2}, and [Author Three]\affil{2}}
+
+\affiliation{1}{[Computer Science], [Appalachian State University], [Boone], [North Carolina], [United States of America]}
+\affiliation{2}{[Institute or Lab], [City], [State], [Country]}
+
+\correspondingauthor{[Corresponding Author Name]}{[email@address.edu]}
+
+\begin{keypoints}
+\item We assemble an hourly multi-source dataset (USGS, NWM, ERA5, NLCD) to correct NWM streamflow at specific sites.
+\item A hybrid transformer improves RMSE over raw NWM on a January 2023 evaluation; the LSTM baseline underperforms.
+\item Design emphasizes leakage-safe alignment, residual targets, and consistent metrics to enable reproducible comparisons.
+\end{keypoints}
+
+\begin{abstract}
+Operational streamflow forecasts from the National Water Model (NWM) are widely used yet exhibit site- and regime-specific errors. We construct an hourly, site-aligned dataset (2010--2022 with 2023 extension) combining USGS discharge (ground truth), NWM CHRTOUT retrospective and operational analyses (baseline), ERA5 atmospheric reanalysis (forcings), and NLCD 2021 static metrics (physiography). We evaluate two architectures for residual correction: a hybrid transformer with convolutional patching, FiLM conditioning, and dual residual/corrected heads; and a residual LSTM baseline that shares preprocessing and loss design. On a January 2023 evaluation window, the hybrid transformer reduces RMSE from 0.708 to 0.440~cms (37.9\% improvement), while the baseline LSTM underperforms. Negative NSE values reflect highly volatile flood-season dynamics and short training spans. We discuss alignment safeguards, calibration needs, and next steps toward robust generalization across hydrologic regimes.
+\end{abstract}
+
+
+\section*{Plain Language Summary}
+Forecasts from the U.S. National Water Model are valuable for rivers and streams but can be biased at specific locations. We built an hourly dataset that combines the model’s predictions, real measurements from USGS gauges, weather reanalysis, and local land-cover information. We then trained machine learning models to learn the difference between the model and reality (the “residual”) and add that back to correct the forecast. A transformer-based model provided the most consistent improvement in a winter flood period, while a simpler recurrent model did not perform as well. We outline how we aligned the data safely and what we will do next to make the corrections more reliable year-round.
+
+\section{Introduction}
+Physics-based hydrologic models such as the National Water Model (NWM) provide high-coverage streamflow guidance but retain site-specific and regime-dependent errors. Data-driven post-processing that corrects model residuals can deliver practical operational gains if it preserves temporal causality, avoids information leakage, and scales across sites and years. This study develops an hourly, multi-source dataset and evaluates modern sequence models for site-aware residual correction, emphasizing reproducibility and fair comparisons across architectures.
+
+\section{Materials and Methods}
+\subsection{Data Sources and Design Principles}
+We target hourly alignment across four sources selected for authority and continuity from 2010--2022, with extension into 2023+: (1) USGS observed discharge as ground truth; (2) NWM CHRTOUT retrospective v3.0 (2021--2023) and operational analysis assimilation (February 2023 onward) as the baseline; (3) ERA5 and ERA5-Land for meteorological context; and (4) NLCD 2021 for static physiographic metrics. The design favors archives with established maintenance, stable identifiers, and clear time standards.
+
+\subsection{NWM Streamflow Collection}
+Retrospective and operational buckets are automatically stitched, handling the 2023 transition to \texttt{.comp} full-physics compression. Downloads parallelize using process-based concurrency and \texttt{boto3}, extracting hourly \texttt{streamflow} by COMID for study sites to reduce I/O. Timestamps are normalized to naive UTC, and duplicates by \texttt{(timestamp, comid)} are removed. Output hourly CSVs are written under \texttt{data/raw/nwm\_v3/retrospective/}. NWM provides physically based baselines against which residual corrections are learned.
+
+\subsection{USGS Ground Truth Collection}
+Robust retrieval uses NWIS CSV endpoints with throttling, exponential backoff, and a circuit breaker to tolerate sustained 503 responses. Timestamps are normalized to UTC at hourly cadence, with unit conversion (cfs to cms) to match NWM conventions. Per-site CSVs saved in \texttt{data/raw/usgs/} serve as ground-truth targets for residual and corrected-flow evaluation.
+
+\subsection{ERA5 Atmospheric Features}
+Monthly, site-specific subsets of ERA5 single levels and ERA5-Land are retrieved via the CDS API at hourly cadence, with an optional 6-hour fallback. Derived variables include temperature, dewpoint, vapor pressure deficit, wind speed, surface pressure, precipitation, radiation, soil moisture, and cyclical time encodings. Outputs are stored per site under \texttt{data/raw/era5/\textless comid\textgreater/}.
+
+\subsection{Dataset Assembly}
+We align NWM, USGS, ERA5, and NLCD into an hourly panel and compute residual $y_{\mathrm{residual}}$ (cms) and corrected $y_{\mathrm{corrected}}$ (cms) targets. Alignment safeguards include: (1) requiring both NWM and USGS coverage for each row; and (2) matching ERA5 6-hour variables within $\pm 3$ hours without forward leakage. Outputs include Parquet shards for years and splits (e.g., 2010--2022 train/val/test) and lightweight CSV samples under \texttt{data/clean/modeling/}. Centralizing this assembly minimizes feature drift and ensures reproducibility across transformer and recurrent baselines.
+
+\section{Model Architectures}
+\subsection{Hybrid Transformer}
+The encoder combines Conv1d patching, sinusoidal and cyclical positional encodings, and transformer layers to capture multi-scale temporal patterns. A dilated convolutional block augments attention for local context, with channel attention to reweight features. Static features (e.g., land cover, regulation flags) traverse a dedicated projection and fuse with temporal embeddings for site-aware corrections. A dual-head decoder predicts residual and corrected discharge, coupled by a consistency term enforcing \(\hat{q}_{\mathrm{corrected}} = q_{\mathrm{nwm}} + \hat{q}_{\mathrm{residual}}\). Training uses focal-weighted MSE, AdamW/Ranger-style optimization (AdamW used in reported runs), automatic mixed precision where available, gradient clipping, and early stopping on validation loss.
+
+\subsection{Residual LSTM Baseline}
+A stacked LSTM (depth and bidirectionality configurable) processes normalized dynamic sequences with dropout. Static-feature projection mirrors the transformer fusion to control information parity. Dual linear heads output residual and corrected predictions under the same focal/consistency/bias-penalty losses and metric suite, enabling direct comparison.
+
+\section{Experimental Setup}
+We evaluate on \texttt{data/clean/modeling/hourly\_training\_2023-01-01\_2023-01-31.parquet} comprising hourly sequences for a cohort of study sites. Splits allocate 21 days to training, 7 days to validation, and the remaining hours to evaluation. Models train up to 20 epochs with early stopping (patience 4), AdamW optimization, focal plus consistency losses, gradient clipping at 1.0, and data augmentation for training batches.
+
+\section{Results}
+We summarize evaluation from 2023-01-28 onward.
+\begin{enumerate}
+\item \textbf{Raw NWM baseline:} RMSE 0.708~cms, MAE 0.588~cms, NSE $-7.73$, KGE $-0.68$, PBIAS $+8.17\%$, $r=0.51$.
+\item \textbf{Hybrid transformer:} RMSE 0.440~cms (37.9\% improvement vs. NWM), MAE 0.332~cms, NSE $-2.37$, KGE $-0.01$, PBIAS $-3.50\%$, $r=0.48$. Residual-head RMSE 0.57~cms.
+\item \textbf{Residual LSTM:} RMSE 1.351~cms (90.8\% worse than NWM), MAE 1.31~cms, NSE $-30.81$, KGE $0.23$, PBIAS $+23.57\%$, $r=0.41$. Residual-head RMSE 0.95~cms.
+\end{enumerate}
+
+\section{Discussion}
+Short context windows in a flood-season month yield volatile dynamics and negative NSE across methods, yet the transformer’s sequence patching and attention stabilize gradients and produce consistent residual corrections, improving RMSE relative to the raw baseline. The LSTM drifts toward positive residual bias, likely due to heavy-tailed targets, shared loss weights, limited recurrent depth, and suboptimal hyperparameters inherited from transformer configurations. We expect performance to improve with longer training spans, tuned recurrent hyperparameters, and recalibrated focal/consistency weights.
+
+\section{Conclusions and Future Work}
+We demonstrate a leakage-aware, reproducible pipeline for correcting NWM streamflow using multi-source hourly data and modern sequence models. The hybrid transformer improves RMSE over NWM in a challenging winter month, while the LSTM baseline underperforms under the current settings. Next steps include: (1) sweeping LSTM hidden size and learning rate with tailored gradient clipping and scheduling; (2) rebalancing residual versus corrected heads (e.g., reduced focal $\gamma$) to curb bias accumulation; and (3) scaling to full 2010--2022 shards to assess robustness across hydrologic regimes.
+
+\section*{Open Research Section}
+All scripts for data acquisition and modeling are organized under \texttt{data\_acquisition\_scripts/} and \texttt{modeling/}. Upon publication, we will archive the processed datasets (Parquet shards and CSV samples) and training artifacts in an open repository (e.g., \texttt{Zenodo}/\texttt{HydroShare}) with DOIs. Public sources include USGS NWIS (observed discharge), NWM CHRTOUT archives (retrospective and operational analyses), ERA5 and ERA5-Land (CDS), and NLCD 2021. Exact access paths and DOIs will be listed in the final reference section.
+
+\section*{As Applicable -- Inclusion in Global Research Statement}
+[If applicable, include disclosures regarding collaborations, permits, and local stakeholder engagement per AGU guidance.]
+
+\section*{Conflict of Interest declaration}
+The authors declare there are no conflicts of interest for this manuscript.
+
+\acknowledgments
+We thank [advisors, collaborators, and agencies]. Funding from [grant or program] is gratefully acknowledged. Computational resources provided by [institution].
+
+% \bibliography{your_bib_file}
+
+\end{document}
