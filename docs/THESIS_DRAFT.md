@@ -134,3 +134,4 @@
 - Document **calibration storyline**: show how coverage diagnostics, PIT histograms, and gain-scale tuning evolve from Watauga to other regimes.
 - Incorporate **operational relevance**: tie improvements to potential decisions (earlier flood warnings, reservoir releases) for regulated vs. unregulated basins.
 - Plan **appendix tables** summarizing site metadata (biome, drainage area, regulation, data availability) to contextualize site selection.
+- Mirror the narrative in a **companion web application** that allows reviewers to interactively compare stations and visualize hydrologic context, reinforcing accessibility goals.
