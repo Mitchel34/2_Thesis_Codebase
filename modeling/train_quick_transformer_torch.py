@@ -17,6 +17,7 @@ import copy
 import json 
 import math
 import os
+import time
 from contextlib import nullcontext
 from typing import Dict, List, Tuple
 
@@ -434,7 +435,9 @@ def train_eval(
 
     mse = nn.MSELoss()
 
+    overall_start = time.time()
     for epoch in range(epochs):
+        epoch_start = time.time()
         model.train()
         running_loss = 0.0
         sample_count = 0
@@ -497,6 +500,10 @@ def train_eval(
         train_loss = running_loss / max(sample_count, 1)
 
         val_loss = float("nan")
+        epoch_time = time.time() - epoch_start
+        avg_epoch_time = (time.time() - overall_start) / (epoch + 1)
+        eta = max(avg_epoch_time * (epochs - (epoch + 1)), 0.0)
+
         if val_loader is not None:
             model.eval()
             val_running = 0.0
@@ -533,7 +540,11 @@ def train_eval(
                     val_samples += len(xb)
 
             val_loss = val_running / max(val_samples, 1)
-            print(f"Epoch {epoch + 1}/{epochs} - train loss: {train_loss:.4f} - val loss: {val_loss:.4f}")
+            print(
+                f"Epoch {epoch + 1}/{epochs} | train loss: {train_loss:.4f} | "
+                f"val loss: {val_loss:.4f} | epoch time: {epoch_time:.1f}s | "
+                f"ETA: {eta/60:.1f} min"
+            )
 
             if use_ranger:
                 scheduler.step(val_loss)
@@ -550,7 +561,10 @@ def train_eval(
                     print("Early stopping triggered based on validation loss")
                     break
         else:
-            print(f"Epoch {epoch + 1}/{epochs} - train loss: {train_loss:.4f}")
+            print(
+                f"Epoch {epoch + 1}/{epochs} | train loss: {train_loss:.4f} | "
+                f"epoch time: {epoch_time:.1f}s | ETA: {eta/60:.1f} min"
+            )
             if use_ranger:
                 scheduler.step(train_loss)
             else:

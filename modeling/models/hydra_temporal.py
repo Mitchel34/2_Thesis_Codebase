@@ -109,9 +109,9 @@ class HydraTemporalModel(nn.Module):
         self,
         input_dim: int,
         static_dim: int = 0,
-        d_model: int = 128,
+        d_model: int = 96,
         num_heads: int = 4,
-        num_layers: int = 4,
+        num_layers: int = 3,
         seq_len: int = 168,
         conv_depth: int = 4,
         dropout: float = 0.1,
@@ -181,11 +181,6 @@ class HydraTemporalModel(nn.Module):
 
         self.residual_logvar_head = nn.Linear(d_model, 1)
         self.corrected_logvar_head = nn.Linear(d_model, 1)
-        self.gainbias_head = nn.Sequential(
-            nn.Linear(d_model, d_model // 2),
-            nn.GELU(),
-            nn.Linear(d_model // 2, 2),
-        )
 
         if self.quantiles:
             self.quantile_head = nn.Linear(d_model, len(self.quantiles))
@@ -224,17 +219,11 @@ class HydraTemporalModel(nn.Module):
         residual_logvar = self.residual_logvar_head(fused).squeeze(-1).clamp(self.logvar_min, self.logvar_max)
         corrected_logvar = self.corrected_logvar_head(fused).squeeze(-1).clamp(self.logvar_min, self.logvar_max)
 
-        gain_bias = self.gainbias_head(fused)
-        gain = 1.0 + self.gain_scale * torch.tanh(gain_bias[:, 0])
-        bias = gain_bias[:, 1]
-
         outputs = {
             "residual_mean": residual_mean,
             "residual_logvar": residual_logvar,
             "corrected_mean": corrected_mean_direct,
             "corrected_logvar": corrected_logvar,
-            "gain": gain,
-            "bias": bias,
         }
 
         if self.quantile_head is not None and self.quantiles:
