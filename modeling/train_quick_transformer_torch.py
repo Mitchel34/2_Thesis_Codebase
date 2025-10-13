@@ -470,18 +470,13 @@ def train_eval(
 
                 pred_res_raw = inverse_transform(outputs["residual_mean"])
                 pred_corr_raw = inverse_transform(outputs["corrected_mean"])
-                gain = outputs["gain"]
-                bias = outputs["bias"]
 
                 corr_from_res = y_nwm + pred_res_raw
-                corr_gain = gain * y_nwm + bias
-                corrected_raw = torch.stack([pred_corr_raw, corr_from_res, corr_gain], dim=0).mean(dim=0)
+                corrected_raw = torch.stack([pred_corr_raw, corr_from_res], dim=0).mean(dim=0)
 
                 loss_consistency = mse(pred_corr_raw, corr_from_res)
-                loss_gain = mse(pred_corr_raw, corr_gain)
-                bias_penalty = torch.mean(torch.abs(pred_res_raw))
 
-                loss = loss_res + loss_corr + 0.1 * (loss_consistency + loss_gain) + 0.01 * bias_penalty
+                loss = loss_res + loss_corr + 0.1 * loss_consistency
 
             if scaler:
                 scaler.scale(loss).backward()
@@ -528,13 +523,9 @@ def train_eval(
                     loss_corr = gaussian_nll(pred_corr_t, logvar_corr, y_usgs_t).mean()
                     pred_res_raw = inverse_transform(outputs["residual_mean"])
                     pred_corr_raw = inverse_transform(outputs["corrected_mean"])
-                    gain = outputs["gain"]
-                    bias = outputs["bias"]
                     corr_from_res = y_nwm + pred_res_raw
-                    corr_gain = gain * y_nwm + bias
                     loss_consistency = mse(pred_corr_raw, corr_from_res)
-                    loss_gain = mse(pred_corr_raw, corr_gain)
-                    loss = loss_res + loss_corr + 0.1 * (loss_consistency + loss_gain)
+                    loss = loss_res + loss_corr + 0.1 * loss_consistency
 
                     val_running += loss.item() * len(xb)
                     val_samples += len(xb)
@@ -586,15 +577,12 @@ def train_eval(
             y_nwm = y_nwm.to(device)
 
             outputs = model(xb, sb if sb.numel() else None)
-            pred_res_raw = inverse_transform(outputs["residual_mean"]).cpu().numpy()
+            pred_res_raw = inverse_transform(outputs["residual_mean"])
             pred_corr_raw = inverse_transform(outputs["corrected_mean"])
-            gain = outputs["gain"]
-            bias = outputs["bias"]
-            corr_from_res = y_nwm + inverse_transform(outputs["residual_mean"])
-            corr_gain = gain * y_nwm + bias
-            corrected_raw = torch.stack([pred_corr_raw, corr_from_res, corr_gain], dim=0).mean(dim=0)
+            corr_from_res = y_nwm + pred_res_raw
+            corrected_raw = torch.stack([pred_corr_raw, corr_from_res], dim=0).mean(dim=0)
 
-            preds_res.append(pred_res_raw)
+            preds_res.append(pred_res_raw.cpu().numpy())
             preds_corr.append(corrected_raw.cpu().numpy())
             targets_res.append(y_res.cpu().numpy())
             targets_usgs.append(y_usgs.cpu().numpy())
