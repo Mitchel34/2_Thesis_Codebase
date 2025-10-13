@@ -207,6 +207,7 @@ def build_dataset(
     out_dir: str = 'data/clean/modeling',
     start: Optional[str] = None,
     end: Optional[str] = None,
+    sites: Optional[Iterable[str]] = None,
 ) -> pd.DataFrame:
     os.makedirs(out_dir, exist_ok=True)
 
@@ -218,7 +219,16 @@ def build_dataset(
         nwm = nwm[nwm['timestamp'] <= pd.to_datetime(end)]
 
     frames = []
-    for site_id, info in MASTER_STUDY_SITES.items():
+    target_sites = (
+        {sid: MASTER_STUDY_SITES[sid] for sid in sites if sid in MASTER_STUDY_SITES}
+        if sites
+        else MASTER_STUDY_SITES
+    )
+
+    if sites and not target_sites:
+        raise ValueError(f"Requested sites {sites} not found in MASTER_STUDY_SITES")
+
+    for site_id, info in target_sites.items():
         site_name = info['name']
         usgs_id = info.get('usgs_id') or info.get('usgs_site') or info.get('usgs')
         comid = info.get('nwm_comid')
@@ -261,7 +271,13 @@ def build_dataset(
             out = out.merge(nlcd_ren, on=key, how='left')
 
     # Save outputs
-    tag = f"{(start or out['timestamp'].min().strftime('%Y%m%d'))}_{(end or out['timestamp'].max().strftime('%Y%m%d'))}"
+    if sites:
+        suffix = "_".join(sorted(sites))
+        tag_base = suffix or "subset"
+    else:
+        tag_base = "all_sites"
+    date_span = f"{(start or out['timestamp'].min().strftime('%Y%m%d'))}_{(end or out['timestamp'].max().strftime('%Y%m%d'))}"
+    tag = f"{tag_base}_{date_span}"
     parquet_path = os.path.join(out_dir, f"hourly_training_{tag}.parquet")
     csv_sample_path = os.path.join(out_dir, f"hourly_training_{tag}_sample.csv")
     out.to_parquet(parquet_path, index=False)
@@ -278,5 +294,6 @@ if __name__ == '__main__':
     ap.add_argument('--out-dir', default='data/clean/modeling', help='Output folder for modeling dataset')
     ap.add_argument('--start', default=None, help='Start date (YYYY-MM-DD) to filter NWM/USGS')
     ap.add_argument('--end', default=None, help='End date (YYYY-MM-DD) to filter NWM/USGS')
+    ap.add_argument('--sites', nargs='*', default=None, help='Optional list of site IDs to process')
     args = ap.parse_args()
-    build_dataset(raw_dir=args.raw_dir, out_dir=args.out_dir, start=args.start, end=args.end)
+    build_dataset(raw_dir=args.raw_dir, out_dir=args.out_dir, start=args.start, end=args.end, sites=args.sites)

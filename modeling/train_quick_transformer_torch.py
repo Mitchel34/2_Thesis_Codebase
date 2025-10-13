@@ -2,19 +2,23 @@
 
 """
 Hydra temporal model training script (PyTorch) for NWM residual correction.
-Version 2 features:
-- Causal TCN stem + transformer encoder with channel attention pooling
-- FiLM conditioning for static features, gain/bias head, heteroscedastic outputs
-- Gaussian NLL on asinh-transformed residual/corrected targets with optional quantile/MoE heads
+- Dynamic features: NWM + available ERA5 columns (normalized per train split)
+- Static features: NLCD percentages, regulation flag, etc. (normalized)
+- Targets: residual (USGS - NWM) and corrected flow (USGS)
+
+Version 2 adds:
+- TCN + transformer hybrid with FiLM conditioning
+- Gain/bias head and heteroscedastic outputs
+- Gaussian NLL losses on asinh-transformed targets
 """
 
 import argparse
 import copy
-import json
+import json 
 import math
 import os
 from contextlib import nullcontext
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -53,6 +57,8 @@ STATIC_NUMERIC = [
     "agriculture_percent",
     "impervious_percent",
 ]
+
+EPS = 1e-6
 
 
 def transform_target(x: torch.Tensor) -> torch.Tensor:
@@ -223,12 +229,6 @@ def gaussian_nll(mean: torch.Tensor, logvar: torch.Tensor, target: torch.Tensor)
     return 0.5 * ((target - mean) ** 2 * inv_var + logvar)
 
 
-def pinball_loss(pred: torch.Tensor, target: torch.Tensor, quantiles: torch.Tensor) -> torch.Tensor:
-    diff = target - pred
-    loss = torch.maximum((quantiles - 1.0) * diff, quantiles * diff)
-    return loss.mean()
-
-
 def train_eval(
     data_path: str,
     seq_len: int = 168,
@@ -247,12 +247,6 @@ def train_eval(
     use_compile: bool = False,
     augment: bool = True,
     use_ranger: bool = True,
-    gain_scale: float = 0.1,
-    logvar_min: float = -6.0,
-    logvar_max: float = 4.0,
-    quantiles: Optional[Iterable[float]] = None,
-    quantile_weight: float = 0.2,
-    moe_experts: int = 1,
     output_prefix: str = "hydra_v2",
 ) -> None:
     torch.set_float32_matmul_precision("medium")
@@ -384,9 +378,11 @@ def train_eval(
         device = torch.device("cuda")
     elif torch.backends.mps.is_available():
         device = torch.device("mps")
-        use_amp = False
     else:
         device = torch.device("cpu")
+
+    if device.type == "mps":
+        use_amp = False
 
     pin_memory = device.type == "cuda"
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, pin_memory=pin_memory)
@@ -397,8 +393,6 @@ def train_eval(
     )
     test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, pin_memory=pin_memory)
 
-    quantile_tuple = tuple(sorted(float(q) for q in quantiles)) if quantiles else None
-
     model = HydraTemporalModel(
         input_dim=len(dynamic_cols),
         static_dim=len(static_cols),
@@ -408,12 +402,8 @@ def train_eval(
         seq_len=seq_len,
         conv_depth=conv_depth,
         dropout=dropout,
-        quantiles=quantile_tuple,
         nwm_index=0,
-        gain_scale=gain_scale,
-        logvar_min=logvar_min,
-        logvar_max=logvar_max,
-        moe_experts=moe_experts,
+        patch_size=1,
     )
 
     if use_compile:
@@ -443,11 +433,6 @@ def train_eval(
     patience_counter = 0
 
     mse = nn.MSELoss()
-    quantile_tensor = (
-        torch.tensor(quantile_tuple, device=device, dtype=torch.float32).view(1, -1)
-        if quantile_tuple
-        else None
-    )
 
     for epoch in range(epochs):
         model.train()
@@ -495,11 +480,6 @@ def train_eval(
 
                 loss = loss_res + loss_corr + 0.1 * (loss_consistency + loss_gain) + 0.01 * bias_penalty
 
-                if quantile_tensor is not None and "quantiles" in outputs:
-                    target_q = y_usgs_t.unsqueeze(-1)
-                    loss_q = pinball_loss(outputs["quantiles"], target_q, quantile_tensor)
-                    loss = loss + quantile_weight * loss_q
-
             if scaler:
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
@@ -532,8 +512,13 @@ def train_eval(
                     outputs = model(xb, sb if sb.numel() else None)
                     y_res_t = transform_target(y_res)
                     y_usgs_t = transform_target(y_usgs)
-                    loss_res = gaussian_nll(outputs["residual_mean"], outputs["residual_logvar"], y_res_t).mean()
-                    loss_corr = gaussian_nll(outputs["corrected_mean"], outputs["corrected_logvar"], y_usgs_t).mean()
+                    pred_res_t = outputs["residual_mean"]
+                    logvar_res = outputs["residual_logvar"]
+                    pred_corr_t = outputs["corrected_mean"]
+                    logvar_corr = outputs["corrected_logvar"]
+
+                    loss_res = gaussian_nll(pred_res_t, logvar_res, y_res_t).mean()
+                    loss_corr = gaussian_nll(pred_corr_t, logvar_corr, y_usgs_t).mean()
                     pred_res_raw = inverse_transform(outputs["residual_mean"])
                     pred_corr_raw = inverse_transform(outputs["corrected_mean"])
                     gain = outputs["gain"]
@@ -543,9 +528,6 @@ def train_eval(
                     loss_consistency = mse(pred_corr_raw, corr_from_res)
                     loss_gain = mse(pred_corr_raw, corr_gain)
                     loss = loss_res + loss_corr + 0.1 * (loss_consistency + loss_gain)
-                    if quantile_tensor is not None and "quantiles" in outputs:
-                        target_q = y_usgs_t.unsqueeze(-1)
-                        loss += quantile_weight * pinball_loss(outputs["quantiles"], target_q, quantile_tensor)
 
                     val_running += loss.item() * len(xb)
                     val_samples += len(xb)
@@ -581,10 +563,6 @@ def train_eval(
     model.eval()
 
     preds_res, preds_corr, targets_res, targets_usgs, targets_nwm = [], [], [], [], []
-    quantile_preds = [] if quantile_tuple else None
-    residual_logvars = []
-    corrected_logvars = []
-
     with torch.no_grad():
         for xb, sb, y_res, y_usgs, y_nwm in test_loader:
             xb = xb.to(device)
@@ -607,12 +585,6 @@ def train_eval(
             targets_res.append(y_res.cpu().numpy())
             targets_usgs.append(y_usgs.cpu().numpy())
             targets_nwm.append(y_nwm.cpu().numpy())
-            residual_logvars.append(outputs["residual_logvar"].cpu().numpy())
-            corrected_logvars.append(outputs["corrected_logvar"].cpu().numpy())
-
-            if quantile_tuple and "quantiles" in outputs:
-                q_vals = inverse_transform(outputs["quantiles"]).cpu().numpy()
-                quantile_preds.append(q_vals)
 
     pred_residual = np.concatenate(preds_res)
     pred_corrected = np.concatenate(preds_corr)
@@ -631,9 +603,7 @@ def train_eval(
 
     base_rmse = baseline_metrics["rmse"]
     corr_rmse = corrected_metrics["rmse"]
-    rel_improve = (
-        100.0 * (base_rmse - corr_rmse) / base_rmse if base_rmse and base_rmse > 0 else float("nan")
-    )
+    rel_improve = 100.0 * (base_rmse - corr_rmse) / base_rmse if base_rmse and base_rmse > 0 else float("nan")
 
     print("Baseline Metrics:")
     for k, v in baseline_metrics.items():
@@ -664,13 +634,6 @@ def train_eval(
             "corrected_true_cms": true_usgs[:aligned_len],
         }
     )
-
-    if quantile_tuple and quantile_preds:
-        quantile_array = np.concatenate(quantile_preds, axis=0)
-        for idx, q in enumerate(quantile_tuple):
-            col = f"corrected_q{int(q * 100):02d}"
-            result_df[col] = quantile_array[:aligned_len, idx]
-
     result_df.to_csv(os.path.join(out_dir, f"{output_prefix}_eval.csv"), index=False)
 
     def _clean_dict(d: Dict[str, float]) -> Dict[str, float | None]:
@@ -687,12 +650,6 @@ def train_eval(
         "corrected": _clean_dict(corrected_metrics),
         "rmse_residual": None if np.isnan(rmse_res) else float(rmse_res),
         "rmse_improvement_pct": None if np.isnan(rel_improve) else float(rel_improve),
-        "gain_scale": gain_scale,
-        "logvar_min": logvar_min,
-        "logvar_max": logvar_max,
-        "quantiles": list(quantile_tuple) if quantile_tuple else None,
-        "quantile_weight": quantile_weight if quantile_tuple else None,
-        "moe_experts": moe_experts,
         "output_prefix": output_prefix,
     }
 
@@ -715,22 +672,12 @@ if __name__ == "__main__":
     parser.add_argument("--conv-depth", type=int, default=4)
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--lr", type=float, default=5e-4)
-    parser.add_argument("--gain-scale", type=float, default=0.1)
-    parser.add_argument("--logvar-min", type=float, default=-6.0)
-    parser.add_argument("--logvar-max", type=float, default=4.0)
-    parser.add_argument("--quantiles", type=str, default=None, help="Comma-separated list, e.g. 0.1,0.5,0.9")
-    parser.add_argument("--quantile-weight", type=float, default=0.2)
-    parser.add_argument("--moe-experts", type=int, default=1)
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument("--no-compile", action="store_true")
     parser.add_argument("--no-augment", action="store_true")
     parser.add_argument("--no-ranger", action="store_true")
     parser.add_argument("--output-prefix", default="hydra_v2")
     args = parser.parse_args()
-
-    quantiles = None
-    if args.quantiles:
-        quantiles = [float(q.strip()) for q in args.quantiles.split(",") if q.strip()]
 
     train_eval(
         data_path=args.data,
@@ -750,11 +697,5 @@ if __name__ == "__main__":
         use_compile=not args.no_compile,
         augment=not args.no_augment,
         use_ranger=not args.no_ranger,
-        gain_scale=args.gain_scale,
-        logvar_min=args.logvar_min,
-        logvar_max=args.logvar_max,
-        quantiles=quantiles,
-        quantile_weight=args.quantile_weight,
-        moe_experts=args.moe_experts,
         output_prefix=args.output_prefix,
     )

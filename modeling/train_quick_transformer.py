@@ -11,10 +11,6 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
-import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras import layers
-
 # Minimal set of features to avoid missing columns
 ERA5_CANDIDATES = [
     'temp_c', 'dewpoint_c', 'pressure_hpa', 'precip_mm', 'radiation_mj_m2',

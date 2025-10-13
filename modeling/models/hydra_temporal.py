@@ -103,7 +103,7 @@ class ChannelAttention(nn.Module):
 
 
 class HydraTemporalModel(nn.Module):
-    """Hybrid temporal encoder with TCN stem, transformer, and heteroscedastic/gain/quantile heads."""
+    """Simplified Hydra encoder: TCN + transformer + heteroscedastic heads."""
 
     def __init__(
         self,
@@ -118,10 +118,10 @@ class HydraTemporalModel(nn.Module):
         quantiles: Optional[Iterable[float]] = None,
         nwm_index: int = 0,
         patch_size: int = 1,
-        gain_scale: float = 0.1,
-        logvar_min: float = -6.0,
-        logvar_max: float = 4.0,
-        moe_experts: int = 1,
+        gain_scale: float = 0.05,
+        logvar_min: float = -4.0,
+        logvar_max: float = 2.0,
+        moe_experts: int = 1,  # retained for backwards compatibility; treated as 1
     ) -> None:
         super().__init__()
         self.quantiles = tuple(float(q) for q in quantiles) if quantiles else None
@@ -155,15 +155,6 @@ class HydraTemporalModel(nn.Module):
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
-        self.conv_branch = DilatedConvBlock(d_model, depth=max(2, conv_depth // 2), dropout=dropout)
-        self.recent_mlp = nn.Sequential(
-            nn.Linear(d_model + input_dim, d_model),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(d_model, d_model),
-        )
-        self.channel_attn = ChannelAttention(d_model)
-
         if static_dim > 0:
             self.static_encoder = nn.Sequential(
                 nn.Linear(static_dim, d_model),
@@ -171,40 +162,22 @@ class HydraTemporalModel(nn.Module):
                 nn.GELU(),
                 nn.Dropout(dropout),
             )
-            self.film = nn.Sequential(
-                nn.Linear(static_dim, d_model * 2),
-                nn.GELU(),
-                nn.Linear(d_model * 2, d_model * 2),
-            )
             static_out = d_model
         else:
             self.static_encoder = None
-            self.film = None
             static_out = 0
 
-        fusion_in = d_model * 3 + static_out
+        fusion_in = d_model * 2 + static_out
         self.fusion = nn.Sequential(
-            nn.Linear(fusion_in, d_model * 2),
-            nn.GLU(),
+            nn.Linear(fusion_in, d_model),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model, d_model),
             nn.LayerNorm(d_model),
         )
 
-        if self.num_experts:
-            self.residual_experts = nn.ModuleList([nn.Linear(d_model, 1) for _ in range(self.num_experts)])
-            self.corrected_experts = nn.ModuleList([nn.Linear(d_model, 1) for _ in range(self.num_experts)])
-            self.moe_gate = nn.Sequential(
-                nn.Linear(d_model, max(32, d_model // 2)),
-                nn.GELU(),
-                nn.Linear(max(32, d_model // 2), self.num_experts),
-            )
-            self.residual_mean_head = None
-            self.corrected_mean_head = None
-        else:
-            self.residual_mean_head = nn.Linear(d_model, 1)
-            self.corrected_mean_head = nn.Linear(d_model, 1)
-            self.residual_experts = None
-            self.corrected_experts = None
-            self.moe_gate = None
+        self.residual_mean_head = nn.Linear(d_model, 1)
+        self.corrected_mean_head = nn.Linear(d_model, 1)
 
         self.residual_logvar_head = nn.Linear(d_model, 1)
         self.corrected_logvar_head = nn.Linear(d_model, 1)
@@ -226,11 +199,6 @@ class HydraTemporalModel(nn.Module):
     ) -> dict:
         seq = self.tcn(x_seq.transpose(1, 2)).transpose(1, 2)
 
-        if self.film is not None and static_feats is not None:
-            gamma_beta = self.film(static_feats)
-            gamma, beta = gamma_beta.chunk(2, dim=-1)
-            seq = seq * (1 + gamma.unsqueeze(1)) + beta.unsqueeze(1)
-
         seq = self.positional(seq)
 
         seq_len = seq.size(1)
@@ -239,30 +207,19 @@ class HydraTemporalModel(nn.Module):
             diagonal=1,
         )
         trans_out = self.transformer(seq, mask=causal_mask)
-        conv_out = self.conv_branch(seq)
-        recent_input = torch.cat([seq[:, -1, :], x_seq[:, -1, :]], dim=-1)
-        recent_out = self.recent_mlp(recent_input)
 
-        trans_out = self.channel_attn(trans_out)[:, -1, :]
-        conv_out = conv_out[:, -1, :]
+        last_token = trans_out[:, -1, :]
+        mean_token = trans_out.mean(dim=1)
 
-        pieces = [trans_out, conv_out, recent_out]
+        pieces = [last_token, mean_token]
         if self.static_encoder is not None and static_feats is not None:
             pieces.append(self.static_encoder(static_feats))
 
         fused = torch.cat(pieces, dim=-1)
         fused = self.fusion(fused)
 
-        if self.num_experts:
-            logits = self.moe_gate(fused)
-            weights = torch.softmax(logits, dim=-1)
-            res_means = torch.stack([layer(fused).squeeze(-1) for layer in self.residual_experts], dim=-1)
-            residual_mean = (weights * res_means).sum(dim=-1)
-            corr_means = torch.stack([layer(fused).squeeze(-1) for layer in self.corrected_experts], dim=-1)
-            corrected_mean_direct = (weights * corr_means).sum(dim=-1)
-        else:
-            residual_mean = self.residual_mean_head(fused).squeeze(-1)
-            corrected_mean_direct = self.corrected_mean_head(fused).squeeze(-1)
+        residual_mean = self.residual_mean_head(fused).squeeze(-1)
+        corrected_mean_direct = self.corrected_mean_head(fused).squeeze(-1)
 
         residual_logvar = self.residual_logvar_head(fused).squeeze(-1).clamp(self.logvar_min, self.logvar_max)
         corrected_logvar = self.corrected_logvar_head(fused).squeeze(-1).clamp(self.logvar_min, self.logvar_max)
