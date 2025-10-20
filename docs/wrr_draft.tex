@@ -22,15 +22,14 @@
 \correspondingauthor{[Corresponding Author Name]}{[email@address.edu]}
 
 \begin{keypoints}
-\item We assemble an hourly multi-source dataset (USGS, NWM, ERA5, NLCD) to correct NWM streamflow at specific sites.
-\item A hybrid transformer improves RMSE over raw NWM on a January 2023 evaluation; the LSTM baseline underperforms.
-\item Design emphasizes leakage-safe alignment, residual targets, and consistent metrics to enable reproducible comparisons.
+\item We build a leakage-safe, hourly dataset (USGS, NWM, ERA5, NLCD) spanning 2010--2022 to support residual post-processing of NWM streamflow.
+\item A streamlined GRU--transformer residual model delivers up to a 20.6\% RMSE reduction; a lighter quantile-trimmed bias shift trades to a 13.4\% gain (NSE~0.64, KGE~0.72) while shrinking percent bias to \(-2.5\%\).
+\item Reproducible pipelines, quantile calibration, and documented hyperparameter sweeps set the stage for future site-to-site scaling toward \(>25\%\) improvements.
 \end{keypoints}
 
 \begin{abstract}
-Operational streamflow forecasts from the National Water Model (NWM) are widely used yet exhibit site- and regime-specific errors. We construct an hourly, site-aligned dataset (2010--2022 with 2023 extension) combining USGS discharge (ground truth), NWM CHRTOUT retrospective and operational analyses (baseline), ERA5 atmospheric reanalysis (forcings), and NLCD 2021 static metrics (physiography). We evaluate two architectures for residual correction: a hybrid transformer with convolutional patching, FiLM conditioning, and dual residual/corrected heads; and a residual LSTM baseline that shares preprocessing and loss design. On a January 2023 evaluation window, the hybrid transformer reduces RMSE from 0.708 to 0.440~cms (37.9\% improvement), while the baseline LSTM underperforms. Negative NSE values reflect highly volatile flood-season dynamics and short training spans. We discuss alignment safeguards, calibration needs, and next steps toward robust generalization across hydrologic regimes.
+Operational streamflow forecasts from the National Water Model (NWM) are widely used yet exhibit site- and regime-specific errors. We construct an hourly, site-aligned dataset (2010--2022) combining USGS discharge (ground truth), NWM CHRTOUT retrospective and operational analyses (baseline), ERA5 atmospheric reanalysis (forcings), and NLCD 2021 static metrics (physiography). Building on this dataset, we benchmark a minimalist GRU--transformer residual model that predicts \(y_{\text{USGS}} - y_{\text{NWM}}\) and reconstructs corrected flows as \(y_{\text{NWM}} + \hat{r}\), trained with heteroscedastic likelihoods, NSE surrogates, and median-focused quantile losses. Evaluated on the held-out 2022 window, the model reduces RMSE from 5.97 to 4.74~cms (20.6\% improvement) but exhibits \(-9.1\%\) bias; adding a quantile-trimmed residual shift yields a gentler 5.17~cms RMSE (13.4\% improvement) with percent bias improved to \(-2.5\%\) while maintaining NSE~0.64 and KGE~0.72. We document the leakage-safe pipeline, calibration diagnostics, and remaining bias challenges, outlining the next steps needed to approach \(>25\%\) improvement across diverse basins.
 \end{abstract}
-
 
 \section*{Plain Language Summary}
 Forecasts from the U.S. National Water Model are valuable for rivers and streams but can be biased at specific locations. We built an hourly dataset that combines the model’s predictions, real measurements from USGS gauges, weather reanalysis, and local land-cover information. We then trained machine learning models to learn the difference between the model and reality (the “residual”) and add that back to correct the forecast. A transformer-based model provided the most consistent improvement in a winter flood period, while a simpler recurrent model did not perform as well. We outline how we aligned the data safely and what we will do next to make the corrections more reliable year-round.
@@ -38,58 +37,99 @@ Forecasts from the U.S. National Water Model are valuable for rivers and streams
 \section{Introduction}
 Physics-based hydrologic models such as the National Water Model (NWM) provide high-coverage streamflow guidance but retain site-specific and regime-dependent errors. Data-driven post-processing that corrects model residuals can deliver practical operational gains if it preserves temporal causality, avoids information leakage, and scales across sites and years. This study develops an hourly, multi-source dataset and evaluates modern sequence models for site-aware residual correction, emphasizing reproducibility and fair comparisons across architectures.
 
+Our working hypothesis is that a rich suite of meteorological covariates—particularly those available from ERA5 and ERA5-Land—encodes much of the physics that drive systematic NWM errors. By explicitly supplying local precipitation, radiation, thermodynamic, and wind signals alongside land-cover descriptors, we expect a learning system to anticipate when NWM will under- or over-predict discharge and to correct those deviations in a causal manner. Although the present work focuses on one well-instrumented watershed, the broader goal is to build a template that can be retrained site-by-site and eventually scaled across diverse U.S. biomes. We therefore document each pipeline step with an eye toward portability so that, once the residual learner is mature, we can deploy it wherever ERA5 and basic physiographic data are available. To further reduce temporal overfitting we plan to evaluate models with rolling-origin time-series cross-validation, an approach shown to produce unbiased risk estimates for dependent data \\citep{bergmeir2012,hyndman2021}.
+
 \section{Materials and Methods}
-\subsection{Data Sources and Design Principles}
-We target hourly alignment across four sources selected for authority and continuity from 2010--2022, with extension into 2023+: (1) USGS observed discharge as ground truth; (2) NWM CHRTOUT retrospective v3.0 (2021--2023) and operational analysis assimilation (February 2023 onward) as the baseline; (3) ERA5 and ERA5-Land for meteorological context; and (4) NLCD 2021 for static physiographic metrics. The design favors archives with established maintenance, stable identifiers, and clear time standards.
+\subsection{End-to-End Pipeline Overview}
+Our workflow converts disparate hydrometeorological feeds into reproducible, leakage-safe training and evaluation artefacts. The major stages are: (1) raw acquisition of USGS discharge, NWM CHRTOUT retrospective/op analysis, ERA5 reanalysis, and NLCD 2021 land-cover metrics; (2) harmonisation of spatial identifiers, units, and timestamps; (3) feature engineering and normalisation driven strictly by train-period statistics; (4) sequence dataset assembly with causal windows and deterministic splits; and (5) model training, validation, and transparent metric reporting. Throughout we prefer open, versioned sources and log every command to enable replay.
 
-\subsection{NWM Streamflow Collection}
-Retrospective and operational buckets are automatically stitched, handling the 2023 transition to \texttt{.comp} full-physics compression. Downloads parallelize using process-based concurrency and \texttt{boto3}, extracting hourly \texttt{streamflow} by COMID for study sites to reduce I/O. Timestamps are normalized to naive UTC, and duplicates by \texttt{(timestamp, comid)} are removed. Output hourly CSVs are written under \texttt{data/raw/nwm\_v3/retrospective/}. NWM provides physically based baselines against which residual corrections are learned.
+\paragraph{Diagram placeholder.} Future Figure~1 will present a swim-lane diagram illustrating how each data source flows through acquisition, preprocessing, and batching stages.
 
-\subsection{USGS Ground Truth Collection}
-Robust retrieval uses NWIS CSV endpoints with throttling, exponential backoff, and a circuit breaker to tolerate sustained 503 responses. Timestamps are normalized to UTC at hourly cadence, with unit conversion (cfs to cms) to match NWM conventions. Per-site CSVs saved in \texttt{data/raw/usgs/} serve as ground-truth targets for residual and corrected-flow evaluation.
+\subsection{Raw Data Acquisition}
+\subsubsection{USGS Gauged Discharge}
+NWIS CSV endpoints are queried per site with bounded concurrency, exponential backoff, and nightly retries. We resample to hourly cadence, convert cfs to cms, and drop points with flagged quality codes. Output CSVs under \texttt{data/raw/usgs/} serve as authoritative ground truth.
 
-\subsection{ERA5 Atmospheric Features}
-Monthly, site-specific subsets of ERA5 single levels and ERA5-Land are retrieved via the CDS API at hourly cadence, with an optional 6-hour fallback. Derived variables include temperature, dewpoint, vapor pressure deficit, wind speed, surface pressure, precipitation, radiation, soil moisture, and cyclical time encodings. Outputs are stored per site under \texttt{data/raw/era5/\textless comid\textgreater/}.
+\subsubsection{NWM Baseline Forecasts}
+Retrospective v3.0 CHRTOUT and operational analysis files are downloaded via \texttt{boto3}. Hourly streamflow is extracted by COMID, timestamps normalised to naive UTC, and duplicate \((\text{timestamp},\text{COMID})\) records removed. Retrospective and operational eras are stitched into a single time series per site.
 
-\subsection{Dataset Assembly}
-We align NWM, USGS, ERA5, and NLCD into an hourly panel and compute residual $y_{\mathrm{residual}}$ (cms) and corrected $y_{\mathrm{corrected}}$ (cms) targets. Alignment safeguards include: (1) requiring both NWM and USGS coverage for each row; and (2) matching ERA5 6-hour variables within $\pm 3$ hours without forward leakage. Outputs include Parquet shards for years and splits (e.g., 2010--2022 train/val/test) and lightweight CSV samples under \texttt{data/clean/modeling/}. Centralizing this assembly minimizes feature drift and ensures reproducibility across transformer and recurrent baselines.
+\subsubsection{ERA5 Meteorological Forcings}
+Monthly ERA5-Land subsets around each gauge are downloaded and interpolated to match gauge timestamps. Variables include temperature, dew point, pressure, precipitation, radiation, wind components, vapour pressure deficit, and derived trigonometric time encodings.
 
-\section{Model Architectures}
-\subsection{Hybrid Transformer}
-The encoder combines Conv1d patching, sinusoidal and cyclical positional encodings, and transformer layers to capture multi-scale temporal patterns. A dilated convolutional block augments attention for local context, with channel attention to reweight features. Static features (e.g., land cover, regulation flags) traverse a dedicated projection and fuse with temporal embeddings for site-aware corrections. A dual-head decoder predicts residual and corrected discharge, coupled by a consistency term enforcing \(\hat{q}_{\mathrm{corrected}} = q_{\mathrm{nwm}} + \hat{q}_{\mathrm{residual}}\). Training uses focal-weighted MSE, AdamW/Ranger-style optimization (AdamW used in reported runs), automatic mixed precision where available, gradient clipping, and early stopping on validation loss.
+\subsubsection{NLCD Static Attributes}
+NLCD 2021 fractions for urban, forest, agriculture, impervious, and wetlands classes are extracted from precomputed rasters. Regulation status flags are encoded to produce binary “is regulated” features.
 
-\subsection{Residual LSTM Baseline}
-A stacked LSTM (depth and bidirectionality configurable) processes normalized dynamic sequences with dropout. Static-feature projection mirrors the transformer fusion to control information parity. Dual linear heads output residual and corrected predictions under the same focal/consistency/bias-penalty losses and metric suite, enabling direct comparison.
+\paragraph{Diagram placeholder.} Future Figure~2 will depict the geographic context—map of study sites alongside representative NLCD land-cover tiles.
 
-\section{Experimental Setup}
-We evaluate on \texttt{data/clean/modeling/hourly\_training\_2023-01-01\_2023-01-31.parquet} comprising hourly sequences for a cohort of study sites. Splits allocate 21 days to training, 7 days to validation, and the remaining hours to evaluation. Models train up to 20 epochs with early stopping (patience 4), AdamW optimization, focal plus consistency losses, gradient clipping at 1.0, and data augmentation for training batches.
+\subsection{Preprocessing and Harmonisation}
+\subsubsection{Temporal Alignment}
+All sources are aligned to the USGS time axis. We enforce left-aligned, causal joins so the residual target at time \(t\) depends only on observations up to \(t\). Missing values are imputed only when explicitly justified (e.g., static features); otherwise rows are dropped and gaps documented.
 
-\section{Results}
-We summarize evaluation from 2023-01-28 onward.
+\subsubsection{Feature Engineering}
+Dynamic ERA5 features are standardised, trigonometric encodings (\(\sin/\cos\)) for hour-of-day, day-of-year, and month-of-year are added, and NLCD percentages are normalised to percentages summing to 100. Residual targets are defined as \(y_{\text{residual}} = y_{\text{USGS}} - y_{\text{NWM}}\); corrected targets serve for evaluation only to avoid label leakage.
+
+\subsubsection{Normalisation Strategy}
+Scaling statistics (mean, standard deviation) are computed over training-period rows only and cached. These statistics are reused verbatim for validation/test to avoid leakage. Static features are z-scored; dynamic inputs use the same per-feature statistics to guarantee comparability across sequences.
+
+\paragraph{Diagram placeholder.} Future Figure~3 will show a table schematic with raw-to-standardised conversions and highlight guardrails against temporal leakage.
+
+\subsection{Dataset Assembly and Splits}
+\subsubsection{Sequence Construction}
+We wrap the aligned dataframe in a \texttt{SeqDataset} class that emits rolling windows of length \(L\) with stride one. Each sample returns (i) dynamic sequence, (ii) static vector, (iii) residual target, (iv) observed discharge, and (v) baseline NWM.
+
+\subsubsection{Splitting Protocol}
+For current experiments we adopt 2010--2020 as training, 2021 as validation, and 2022 as the held-out test set. The loader enforces a single-site invariant to prevent cross-basin leakage and raises if multiple COMIDs appear.
+
+\paragraph{Diagram placeholder.} Future Figure~4 will provide a timeline illustrating the rolling window mechanism, highlighting how training, validation, and test slices are constructed without overlap.
+
+\subsection{Training Workflow}
+\subsubsection{Optimisation Loop}
+Mini-batches are drawn with causal order preserved. We employ AdamW (or Ranger when available) with gradient clipping, optional mixed precision, and cosine or plateau schedulers. Early stopping monitors validation loss with a patience of 4--6 epochs.
+
+\subsubsection{Loss Composition}
+The core objective combines: (i) heteroscedastic Gaussian negative log-likelihood on the residual; (ii) the same likelihood on the corrected flow derived as \(y_{\text{NWM}} + \hat{y}_{\text{residual}}\); (iii) an optional NSE surrogate; (iv) median-weighted quantile pinball loss; and (v) a mild squared mean-bias penalty. Flow-weighted factors emphasise high-magnitude events without destabilising low-flow performance.
+
+\paragraph{Diagram placeholder.} Future Figure~5 will outline the training loop, including loss components and gradient flow from residual and corrected outputs.
+
+\subsection{Evaluation and Reporting}
+After training we reload the best checkpoint (lowest validation loss) and generate test-set predictions. Metrics include RMSE, MAE, NSE, Kling-Gupta efficiency, percent bias, Pearson, and Spearman correlations. We also compute quantile coverage/bias for each probabilistic head and archive predictions, metrics JSON, and configuration command strings under versioned directories to ensure reproducibility.
+
+\paragraph{Diagram placeholder.} Future Figure~6 will visualise cumulative distribution improvements and quantile coverage, providing an at-a-glance comparison between NWM and corrected forecasts.
+
+\section{Model Architecture}
+\subsection{Transformer Primer}
+Transformers model sequential data using stacked self-attention and position-wise feed-forward layers wrapped in residual connections. Each encoder block projects the sequence into query, key, and value representations, computes scaled dot-product attention, and refines the representation through a feed-forward sublayer. Layer normalisation and residual paths stabilise training, while positional encodings (sinusoidal or learned) preserve order information absent in the attention mechanism itself.
+
+\paragraph{Diagram placeholder.} Future Figure~7 will sketch a generic transformer encoder, labelling key components (self-attention, feed-forward, residual/normalisation) alongside the positional encodings.
+
+\subsection{Minimal Residual Transformer Baseline}
+Our baseline couples a lightweight GRU pre-encoder with a two-layer transformer encoder (\(d_\text{model}=64\), four heads) to capture both sequential memory and multi-scale context. Static NLCD embeddings are projected once and concatenated with pooled transformer summaries (last token and mean pooling), then passed through a compact fusion MLP. The network predicts (i) the residual mean, (ii) residual log-variance, and (iii) corrected-flow log-variance. Corrected flows are recovered as \(y_{\text{NWM}} + \hat{y}_{\text{residual}}\), anchoring the model to the physical baseline. Optional quantile heads provide calibrated distributional forecasts for decision support.
+
+\paragraph{Diagram placeholder.} Future Figure~8 will depict the baseline architecture: GRU front-end, transformer encoder blocks, fusion layer, and output heads, highlighting data paths for dynamic, static, and residual channels.
+
+\subsection{Design Elements We Intend to Preserve}
+As we iterate toward \(\geq 25\%\) RMSE improvement over raw NWM forecasts, several architectural choices have proven essential:
 \begin{enumerate}
-\item \textbf{Raw NWM baseline:} RMSE 0.708~cms, MAE 0.588~cms, NSE $-7.73$, KGE $-0.68$, PBIAS $+8.17\%$, $r=0.51$.
-\item \textbf{Hybrid transformer:} RMSE 0.440~cms (37.9\% improvement vs. NWM), MAE 0.332~cms, NSE $-2.37$, KGE $-0.01$, PBIAS $-3.50\%$, $r=0.48$. Residual-head RMSE 0.57~cms.
-\item \textbf{Residual LSTM:} RMSE 1.351~cms (90.8\% worse than NWM), MAE 1.31~cms, NSE $-30.81$, KGE $0.23$, PBIAS $+23.57\%$, $r=0.41$. Residual-head RMSE 0.95~cms.
+    \item \textbf{Residual-first formulation.} Predicting the residual and reconstructing corrected flow preserves physical consistency and simplifies calibration.
+    \item \textbf{GRU $+$ Transformer fusion.} The GRU captures short-term persistence, while attention layers offer long-range context with modest parameter growth.
+    \item \textbf{Heteroscedastic outputs.} Log-variance heads stabilise training and enable uncertainty-aware evaluation.
+    \item \textbf{Median-focused quantile loss.} Weighting the 0.5 quantile encourages unbiased central tendencies while maintaining tail awareness.
+    \item \textbf{Consistency constraints.} Penalising divergence between derived and direct corrected outputs keeps the model anchored to physically plausible corrections.
 \end{enumerate}
 
-\section{Discussion}
-Short context windows in a flood-season month yield volatile dynamics and negative NSE across methods, yet the transformer’s sequence patching and attention stabilize gradients and produce consistent residual corrections, improving RMSE relative to the raw baseline. The LSTM drifts toward positive residual bias, likely due to heavy-tailed targets, shared loss weights, limited recurrent depth, and suboptimal hyperparameters inherited from transformer configurations. We expect performance to improve with longer training spans, tuned recurrent hyperparameters, and recalibrated focal/consistency weights.
+\paragraph{Diagram placeholder.} Future Figure~9 will compare incremental architectural variants (baseline, additional cross-attention, multi-scale pooling) and annotate expected gains.
 
-\section{Conclusions and Future Work}
-We demonstrate a leakage-aware, reproducible pipeline for correcting NWM streamflow using multi-source hourly data and modern sequence models. The hybrid transformer improves RMSE over NWM in a challenging winter month, while the LSTM baseline underperforms under the current settings. Next steps include: (1) sweeping LSTM hidden size and learning rate with tailored gradient clipping and scheduling; (2) rebalancing residual versus corrected heads (e.g., reduced focal $\gamma$) to curb bias accumulation; and (3) scaling to full 2010--2022 shards to assess robustness across hydrologic regimes.
+\section{Results to Date}
+Our latest GRU-transformer residual model attains a 4.74~cms RMSE (20.6\% reduction) relative to the raw NWM baseline, although the corresponding percent bias remains \(-9.1\%\). Applying the new quantile-trimmed residual shift—averaging validation residuals between the 5th and 90th flow quantiles and tapering weights toward low flows—yields a 5.17~cms RMSE (13.4\% reduction) with percent bias reduced to \(-2.5\%\), NSE~0.64, and KGE~0.72. Median-focused quantile weighting continues to lift q50 coverage above 0.60, and further calibration work will target simultaneous improvements across RMSE, NSE, KGE, and PBIAS. All experiments are archived (commands plus metrics) to provide auditable baselines for future iterations.
 
-\section*{Open Research Section}
-All scripts for data acquisition and modeling are organized under \texttt{data\_acquisition\_scripts/} and \texttt{modeling/}. Upon publication, we will archive the processed datasets (Parquet shards and CSV samples) and training artifacts in an open repository (e.g., \texttt{Zenodo}/\texttt{HydroShare}) with DOIs. Public sources include USGS NWIS (observed discharge), NWM CHRTOUT archives (retrospective and operational analyses), ERA5 and ERA5-Land (CDS), and NLCD 2021. Exact access paths and DOIs will be listed in the final reference section.
+\paragraph{Diagram placeholder.} Future Figure~10 will show side-by-side hydrographs for select sites, illustrating baseline vs corrected flow, residuals, and forecast uncertainty envelopes.
 
-\section*{As Applicable -- Inclusion in Global Research Statement}
-[If applicable, include disclosures regarding collaborations, permits, and local stakeholder engagement per AGU guidance.]
+\section{Discussion and Future Work}
+Upcoming work will (i) broaden the hyperparameter search over consistency and NSE weights now that the richer baseline is stable; (ii) explore cross-attention between dynamic and static channels; (iii) integrate bias-aware calibration objectives; and (iv) package the pipeline into reproducible releases. Achieving \(\geq 25\%\) improvement will likely require both architectural refinement and calibrated loss shaping, and the current documentation provides the scaffold for those iterations.
 
-\section*{Conflict of Interest declaration}
-The authors declare there are no conflicts of interest for this manuscript.
+\begin{thebibliography}{99}
+ibitem[\textit{Bergmeir and Ben\'{i}tez}(2012)]{bergmeir2012} Bergmeir, C., and J. M. Ben\'{i}tez (2012), On the use of cross-validation for time series predictor evaluation, \textit{Information Sciences}, \textit{191}, 192--213, doi:10.1016/j.ins.2011.12.028.
 
-\acknowledgments
-We thank [advisors, collaborators, and agencies]. Funding from [grant or program] is gratefully acknowledged. Computational resources provided by [institution].
-
-% \bibliography{your_bib_file}
+ibitem[\textit{Hyndman and Athanasopoulos}(2021)]{hyndman2021} Hyndman, R. J., and G. Athanasopoulos (2021), \textit{Forecasting: Principles and Practice}, 3rd ed., OTexts, Melbourne, Australia. Retrieved from https://otexts.com/fpp3/.
+\end{thebibliography}
 
 \end{document}

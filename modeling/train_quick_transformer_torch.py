@@ -7,9 +7,9 @@ Hydra temporal model training script (PyTorch) for NWM residual correction.
 - Targets: residual (USGS - NWM) and corrected flow (USGS)
 
 Version 2 adds:
-- TCN + transformer hybrid with FiLM conditioning
-- Gain/bias head and heteroscedastic outputs
-- Gaussian NLL losses on asinh-transformed targets
+- Transformer encoder with attention pooling and multi-window statistics
+- Heteroscedastic heads for residual and corrected flow predictions
+- Multi-objective loss (Gaussian NLL, NSE surrogate, quantile pinball) on asinh-transformed targets
 """
 
 import argparse
@@ -19,7 +19,7 @@ import math
 import os
 import time
 from contextlib import nullcontext
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -230,6 +230,29 @@ def gaussian_nll(mean: torch.Tensor, logvar: torch.Tensor, target: torch.Tensor)
     return 0.5 * ((target - mean) ** 2 * inv_var + logvar)
 
 
+def flow_weighting(flows: torch.Tensor, emphasis: float) -> torch.Tensor:
+    if emphasis <= 0:
+        return torch.ones_like(flows)
+    baseline = torch.mean(torch.abs(flows)) + EPS
+    return 1.0 + emphasis * torch.abs(flows) / baseline
+
+
+def nse_surrogate(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    denom = torch.sum((target - target.mean()) ** 2) + EPS
+    return torch.sum((pred - target) ** 2) / denom
+
+
+def quantile_pinball(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    quantiles: torch.Tensor,
+    weights: torch.Tensor,
+) -> torch.Tensor:
+    diff = target.unsqueeze(1) - pred
+    loss = torch.where(diff >= 0, quantiles * diff, (quantiles - 1.0) * diff)
+    return torch.mean(loss * weights)
+
+
 def train_eval(
     data_path: str,
     seq_len: int = 168,
@@ -237,6 +260,10 @@ def train_eval(
     batch_size: int = 64,
     train_days: int = 28,
     val_days: int = 7,
+    train_start: Optional[str] = None,
+    train_end: Optional[str] = None,
+    val_start: Optional[str] = None,
+    val_end: Optional[str] = None,
     patience: int = 5,
     d_model: int = 128,
     num_heads: int = 4,
@@ -244,6 +271,18 @@ def train_eval(
     conv_depth: int = 4,
     dropout: float = 0.1,
     lr: float = 5e-4,
+    quantiles: Optional[List[float]] = None,
+    quantile_weights: Optional[List[float]] = None,
+    weight_nse: float = 0.0,
+    weight_quantile: float = 0.0,
+    flow_emphasis: float = 0.0,
+    consistency_weight: float = 1.0,
+    weight_pbias: float = 0.0,
+    residual_bias_weight: float = 0.0,
+    bias_shift_alpha: float = 0.0,
+    bias_shift_qmin: float = 0.0,
+    bias_shift_qmax: float = 1.0,
+    bias_shift_weight_power: float = 0.0,
     use_amp: bool = True,
     use_compile: bool = False,
     augment: bool = True,
@@ -251,29 +290,66 @@ def train_eval(
     output_prefix: str = "hydra_v2",
 ) -> None:
     torch.set_float32_matmul_precision("medium")
+    quantiles = list(quantiles) if quantiles else []
+    if quantiles and quantile_weights and len(quantile_weights) != len(quantiles):
+        raise ValueError("quantile_weights must match the number of quantile levels")
+    if quantiles and not quantile_weights:
+        quantile_weights = [1.0 for _ in quantiles]
+    quantile_weights = list(quantile_weights) if quantile_weights else []
     df = load_data(data_path)
-    start = df["timestamp"].min()
-    train_cutoff = start + pd.Timedelta(days=train_days)
-    val_cutoff = train_cutoff + pd.Timedelta(days=val_days) if val_days > 0 else train_cutoff
+    site_cols = [c for c in ("site_name", "comid") if c in df.columns]
+    if site_cols:
+        for col in site_cols:
+            if df[col].nunique() > 1:
+                unique_vals = df[col].nunique()
+                raise ValueError(
+                    f"Dataset contains {unique_vals} unique values in '{col}'. "
+                    "Train each gauge/site separately to avoid sequence leakage."
+                )
+    if all(ts is not None for ts in (train_start, train_end)):
+        train_start_ts = pd.Timestamp(train_start)
+        train_end_ts = pd.Timestamp(train_end)
+    else:
+        start = df["timestamp"].min()
+        train_start_ts = start
+        train_end_ts = start + pd.Timedelta(days=train_days)
 
-    train_mask = df["timestamp"] < train_cutoff
+    train_mask = (df["timestamp"] >= train_start_ts) & (df["timestamp"] <= train_end_ts)
     if train_mask.sum() <= seq_len:
         raise ValueError("Training window shorter than sequence length")
 
-    if val_days > 0:
-        val_mask = (df["timestamp"] >= train_cutoff) & (df["timestamp"] < val_cutoff)
+    if val_start is not None and val_end is not None:
+        val_start_ts = pd.Timestamp(val_start)
+        val_end_ts = pd.Timestamp(val_end)
+        val_mask = (df["timestamp"] >= val_start_ts) & (df["timestamp"] <= val_end_ts)
+        test_mask = df["timestamp"] > val_end_ts
     else:
-        val_mask = pd.Series(False, index=df.index)
-
-    test_mask = df["timestamp"] >= val_cutoff if val_days > 0 else ~train_mask
+        if val_days > 0:
+            val_start_ts = train_end_ts
+            val_end_ts = train_end_ts + pd.Timedelta(days=val_days)
+            val_mask = (df["timestamp"] >= val_start_ts) & (df["timestamp"] < val_end_ts)
+            test_mask = df["timestamp"] >= val_end_ts
+        else:
+            val_mask = pd.Series(False, index=df.index)
+            test_mask = ~train_mask
     if test_mask.sum() == 0:
         raise ValueError("No evaluation rows available after split")
 
     dynamic_cols = ["nwm_cms"] + [c for c in ERA5_CANDIDATES if c in df.columns]
     if not dynamic_cols or dynamic_cols[0] != "nwm_cms":
         raise ValueError("First dynamic feature must be 'nwm_cms'")
+    if len(dynamic_cols) <= 1:
+        raise ValueError(
+            "Dynamic feature set contains only 'nwm_cms'. "
+            "Ensure ERA5/meteorological columns are present in the parquet."
+        )
 
     static_cols = add_static_columns(df)
+    if not static_cols:
+        raise ValueError(
+            "No static columns detected (e.g., NLCD percentages). "
+            "Rebuild the dataset with static land-cover features to proceed."
+        )
 
     dyn_scaled, static_scaled, _ = prepare_features(df, df.index[train_mask], dynamic_cols, static_cols)
 
@@ -403,6 +479,7 @@ def train_eval(
         seq_len=seq_len,
         conv_depth=conv_depth,
         dropout=dropout,
+        quantiles=quantiles if quantiles else None,
         nwm_index=0,
         patch_size=1,
     )
@@ -414,6 +491,12 @@ def train_eval(
             print(f"torch.compile unavailable ({exc}); continuing without compilation")
 
     model = model.to(device)
+    quantiles_tensor = torch.tensor(quantiles, device=device, dtype=torch.float32) if quantiles else None
+    quantile_weight_tensor = (
+        torch.tensor(quantile_weights, device=device, dtype=torch.float32) if quantiles else None
+    )
+    if quantile_weight_tensor is not None:
+        quantile_weight_tensor = quantile_weight_tensor / (quantile_weight_tensor.sum() + EPS)
 
     if use_ranger and Ranger is None:
         print("torch_optimizer.Ranger unavailable; falling back to AdamW")
@@ -432,6 +515,8 @@ def train_eval(
     best_state = copy.deepcopy(model.state_dict())
     best_val_loss = float("inf")
     patience_counter = 0
+    num_train_batches = len(train_loader)
+    progress_stride = max(1, num_train_batches // 5)
 
     mse = nn.MSELoss()
 
@@ -441,7 +526,8 @@ def train_eval(
         model.train()
         running_loss = 0.0
         sample_count = 0
-        for xb, sb, y_res, y_usgs, y_nwm in train_loader:
+        print(f"Epoch {epoch + 1}/{epochs} - training start ({num_train_batches} batches)")
+        for batch_idx, (xb, sb, y_res, y_usgs, y_nwm) in enumerate(train_loader):
             xb = xb.to(device)
             sb = sb.to(device)
             y_res = y_res.to(device)
@@ -464,19 +550,36 @@ def train_eval(
                 logvar_res = outputs["residual_logvar"]
                 loss_res = gaussian_nll(pred_res_t, logvar_res, y_res_t).mean()
 
-                pred_corr_t = outputs["corrected_mean"]
                 logvar_corr = outputs["corrected_logvar"]
-                loss_corr = gaussian_nll(pred_corr_t, logvar_corr, y_usgs_t).mean()
-
-                pred_res_raw = inverse_transform(outputs["residual_mean"])
-                pred_corr_raw = inverse_transform(outputs["corrected_mean"])
-
+                pred_res_raw = inverse_transform(pred_res_t)
                 corr_from_res = y_nwm + pred_res_raw
-                corrected_raw = torch.stack([pred_corr_raw, corr_from_res], dim=0).mean(dim=0)
+                pred_corr_t = transform_target(corr_from_res)
+                corr_nll = gaussian_nll(pred_corr_t, logvar_corr, y_usgs_t)
+                corr_weights = flow_weighting(y_usgs, flow_emphasis)
+                loss_corr = (corr_nll * corr_weights).mean()
+                loss = loss_res + loss_corr + consistency_weight * mse(pred_corr_t, y_usgs_t)
 
-                loss_consistency = mse(pred_corr_raw, corr_from_res)
+                if weight_pbias > 0:
+                    pbias_raw = torch.abs(torch.mean(corr_from_res - y_usgs)) / (torch.mean(torch.abs(y_usgs)) + EPS)
+                    loss = loss + weight_pbias * pbias_raw
 
-                loss = loss_res + loss_corr + 0.1 * loss_consistency
+                if weight_nse > 0:
+                    loss = loss + weight_nse * nse_surrogate(corr_from_res, y_usgs)
+
+                if residual_bias_weight > 0:
+                    mean_bias = torch.mean(corr_from_res - y_usgs)
+                    norm = torch.mean(torch.abs(y_usgs)) + EPS
+                    loss = loss + residual_bias_weight * (mean_bias / norm) ** 2
+
+                if (
+                    weight_quantile > 0
+                    and quantiles_tensor is not None
+                    and quantile_weight_tensor is not None
+                    and "quantiles" in outputs
+                ):
+                    q_pred_raw = inverse_transform(outputs["quantiles"])
+                    quantile_loss_val = quantile_pinball(q_pred_raw, y_usgs, quantiles_tensor, quantile_weight_tensor)
+                    loss = loss + weight_quantile * quantile_loss_val
 
             if scaler:
                 scaler.scale(loss).backward()
@@ -491,6 +594,17 @@ def train_eval(
 
             running_loss += loss.item() * len(xb)
             sample_count += len(xb)
+
+            if (batch_idx + 1) % progress_stride == 0 or batch_idx + 1 == num_train_batches:
+                elapsed = time.time() - epoch_start
+                frac = (batch_idx + 1) / max(num_train_batches, 1)
+                est_epoch_time = elapsed / max(frac, 1e-6)
+                remaining_epoch = max(est_epoch_time - elapsed, 0.0)
+                print(
+                    f"  Batch {batch_idx + 1}/{num_train_batches} ({frac * 100:.0f}%) | "
+                    f"elapsed {elapsed:.1f}s | est epoch {est_epoch_time:.1f}s | "
+                    f"epoch remaining {remaining_epoch:.1f}s"
+                )
 
         train_loss = running_loss / max(sample_count, 1)
 
@@ -516,16 +630,36 @@ def train_eval(
                     y_usgs_t = transform_target(y_usgs)
                     pred_res_t = outputs["residual_mean"]
                     logvar_res = outputs["residual_logvar"]
-                    pred_corr_t = outputs["corrected_mean"]
                     logvar_corr = outputs["corrected_logvar"]
 
                     loss_res = gaussian_nll(pred_res_t, logvar_res, y_res_t).mean()
-                    loss_corr = gaussian_nll(pred_corr_t, logvar_corr, y_usgs_t).mean()
-                    pred_res_raw = inverse_transform(outputs["residual_mean"])
-                    pred_corr_raw = inverse_transform(outputs["corrected_mean"])
+                    corr_weights = flow_weighting(y_usgs, flow_emphasis)
+
+                    pred_res_raw = inverse_transform(pred_res_t)
                     corr_from_res = y_nwm + pred_res_raw
-                    loss_consistency = mse(pred_corr_raw, corr_from_res)
-                    loss = loss_res + loss_corr + 0.1 * loss_consistency
+                    pred_corr_t = transform_target(corr_from_res)
+                    corr_nll = gaussian_nll(pred_corr_t, logvar_corr, y_usgs_t)
+                    loss_corr = (corr_nll * corr_weights).mean()
+                    loss = loss_res + loss_corr + consistency_weight * mse(pred_corr_t, y_usgs_t)
+                    if weight_pbias > 0:
+                        pbias_raw = torch.abs(torch.mean(corr_from_res - y_usgs)) / (torch.mean(torch.abs(y_usgs)) + EPS)
+                        loss = loss + weight_pbias * pbias_raw
+                    if weight_nse > 0:
+                        loss = loss + weight_nse * nse_surrogate(corr_from_res, y_usgs)
+                    if residual_bias_weight > 0:
+                        mean_bias = torch.mean(corr_from_res - y_usgs)
+                        norm = torch.mean(torch.abs(y_usgs)) + EPS
+                        loss = loss + residual_bias_weight * (mean_bias / norm) ** 2
+                    if (
+                        weight_quantile > 0
+                        and quantiles_tensor is not None
+                        and quantile_weight_tensor is not None
+                        and "quantiles" in outputs
+                    ):
+                        q_pred_raw = inverse_transform(outputs["quantiles"])
+                        loss = loss + weight_quantile * quantile_pinball(
+                            q_pred_raw, y_usgs, quantiles_tensor, quantile_weight_tensor
+                        )
 
                     val_running += loss.item() * len(xb)
                     val_samples += len(xb)
@@ -566,8 +700,64 @@ def train_eval(
 
     model.load_state_dict(best_state)
     model.eval()
+    total_training_time = time.time() - overall_start
+    print(f"Training complete in {total_training_time/60:.2f} minutes")
+
+    if bias_shift_alpha > 0 and val_loader is not None:
+        bias_diffs: List[np.ndarray] = []
+        flow_samples: List[np.ndarray] = []
+        with torch.no_grad():
+            for xb, sb, y_res, y_usgs, y_nwm in val_loader:
+                xb = xb.to(device)
+                sb = sb.to(device)
+                y_res = y_res.to(device)
+                y_usgs = y_usgs.to(device)
+                y_nwm = y_nwm.to(device)
+
+                outputs = model(xb, sb if sb.numel() else None)
+                pred_res_raw = inverse_transform(outputs["residual_mean"])
+                corr_from_res = y_nwm + pred_res_raw
+                diff = (corr_from_res - y_usgs).detach().cpu().numpy()
+                flows = y_usgs.detach().cpu().numpy()
+                bias_diffs.append(diff)
+                flow_samples.append(flows)
+
+        if bias_diffs:
+            diff_vec = np.concatenate(bias_diffs)
+            flow_vec = np.concatenate(flow_samples)
+            qmin = float(np.clip(bias_shift_qmin, 0.0, 1.0))
+            qmax = float(np.clip(bias_shift_qmax, 0.0, 1.0))
+            if qmax < qmin:
+                qmin, qmax = qmax, qmin
+            mask = np.ones_like(flow_vec, dtype=bool)
+            if qmin > 0.0 or qmax < 1.0:
+                low = np.quantile(flow_vec, qmin)
+                high = np.quantile(flow_vec, qmax)
+                mask = (flow_vec >= low) & (flow_vec <= high)
+            if np.any(mask):
+                weights = np.ones_like(diff_vec, dtype=np.float64)
+                if abs(bias_shift_weight_power) > 1e-8:
+                    # Optionally emphasise/discount flows by magnitude before measuring mean bias.
+                    weights = (np.abs(flow_vec) + EPS) ** bias_shift_weight_power
+                weights = weights[mask]
+                bias_slice = diff_vec[mask]
+                weight_sum = np.sum(weights)
+                if weight_sum > 0 and bias_slice.size > 0:
+                    mean_bias = float(np.sum(bias_slice * weights) / weight_sum)
+                    shift = bias_shift_alpha * mean_bias
+                    model.residual_bias.data -= torch.tensor(shift, device=model.residual_bias.data.device)
+                    print(
+                        "Applied scaled residual bias shift: "
+                        f"{shift:+.4f} (alpha={bias_shift_alpha}, q=[{qmin:.2f},{qmax:.2f}], "
+                        f"weight_pow={bias_shift_weight_power:.2f})"
+                    )
+                else:
+                    print("Skipped residual bias shift (insufficient weighted samples).")
+            else:
+                print("Skipped residual bias shift (no validation samples within specified quantiles).")
 
     preds_res, preds_corr, targets_res, targets_usgs, targets_nwm = [], [], [], [], []
+    preds_quantiles = [] if quantiles else None
     with torch.no_grad():
         for xb, sb, y_res, y_usgs, y_nwm in test_loader:
             xb = xb.to(device)
@@ -578,15 +768,16 @@ def train_eval(
 
             outputs = model(xb, sb if sb.numel() else None)
             pred_res_raw = inverse_transform(outputs["residual_mean"])
-            pred_corr_raw = inverse_transform(outputs["corrected_mean"])
             corr_from_res = y_nwm + pred_res_raw
-            corrected_raw = torch.stack([pred_corr_raw, corr_from_res], dim=0).mean(dim=0)
+            corrected_raw = corr_from_res
 
             preds_res.append(pred_res_raw.cpu().numpy())
             preds_corr.append(corrected_raw.cpu().numpy())
             targets_res.append(y_res.cpu().numpy())
             targets_usgs.append(y_usgs.cpu().numpy())
             targets_nwm.append(y_nwm.cpu().numpy())
+            if preds_quantiles is not None and "quantiles" in outputs:
+                preds_quantiles.append(inverse_transform(outputs["quantiles"]).cpu().numpy())
 
     pred_residual = np.concatenate(preds_res)
     pred_corrected = np.concatenate(preds_corr)
@@ -599,6 +790,14 @@ def train_eval(
 
     baseline_metrics = compute_hydro_metrics(nwm_vals, true_usgs)
     corrected_metrics = compute_hydro_metrics(corrected_pred, true_usgs)
+
+    quantile_metrics: Dict[str, Dict[str, float]] = {}
+    if preds_quantiles:
+        q_pred = np.concatenate(preds_quantiles)
+        for idx, q in enumerate(quantiles):
+            coverage = float(np.mean(true_usgs <= q_pred[:, idx]))
+            bias = float(np.mean(q_pred[:, idx] - true_usgs))
+            quantile_metrics[f"{q:.2f}"] = {"coverage": coverage, "bias": bias}
 
     mse_res = np.mean((pred_residual - true_residual) ** 2)
     rmse_res = float(np.sqrt(mse_res))
@@ -654,6 +853,8 @@ def train_eval(
         "rmse_improvement_pct": None if np.isnan(rel_improve) else float(rel_improve),
         "output_prefix": output_prefix,
     }
+    if quantile_metrics:
+        metrics_payload["quantiles"] = quantile_metrics
 
     with open(os.path.join(out_dir, f"{output_prefix}_metrics.json"), "w") as fh:
         json.dump(metrics_payload, fh, indent=2)
@@ -665,8 +866,12 @@ if __name__ == "__main__":
     parser.add_argument("--seq-len", type=int, default=168)
     parser.add_argument("--epochs", type=int, default=40)
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--train-days", type=int, default=28)
-    parser.add_argument("--val-days", type=int, default=7)
+    parser.add_argument("--train-days", type=int, default=4018)
+    parser.add_argument("--val-days", type=int, default=365)
+    parser.add_argument("--train-start", default=None, help="Explicit train window start (YYYY-MM-DD)")
+    parser.add_argument("--train-end", default=None, help="Explicit train window end (YYYY-MM-DD)")
+    parser.add_argument("--val-start", default=None, help="Explicit validation window start (YYYY-MM-DD)")
+    parser.add_argument("--val-end", default=None, help="Explicit validation window end (YYYY-MM-DD)")
     parser.add_argument("--patience", type=int, default=5)
     parser.add_argument("--d-model", type=int, default=128)
     parser.add_argument("--num-heads", type=int, default=4)
@@ -674,12 +879,47 @@ if __name__ == "__main__":
     parser.add_argument("--conv-depth", type=int, default=4)
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--lr", type=float, default=5e-4)
+    parser.add_argument("--quantiles", default="0.1,0.5,0.9", help="Comma-separated quantile levels")
+    parser.add_argument(
+        "--quantile-weights",
+        default="0.3,1.0,0.3",
+        help="Comma-separated weights for quantile pinball loss (align with quantiles)",
+    )
+    parser.add_argument("--weight-nse", type=float, default=0.2, help="Weight for NSE surrogate loss")
+    parser.add_argument("--weight-quantile", type=float, default=0.1, help="Weight for quantile pinball loss")
+    parser.add_argument("--flow-emphasis", type=float, default=0.3, help="Emphasis factor for high-flow weighting")
+    parser.add_argument("--consistency-weight", type=float, default=1.0, help="Weight tying corrected predictions to nwm + residual")
+    parser.add_argument("--weight-pbias", type=float, default=0.05, help="Weight for absolute PBIAS penalty in raw space")
+    parser.add_argument("--residual-bias-weight", type=float, default=0.0, help="Weight for squared mean bias penalty")
+    parser.add_argument("--bias-shift-alpha", type=float, default=0.0, help="Post-training bias correction factor (0=off)")
+    parser.add_argument(
+        "--bias-shift-qmin",
+        type=float,
+        default=0.0,
+        help="Lower quantile bound (0-1) of observed flows used to compute bias shift (default uses all samples).",
+    )
+    parser.add_argument(
+        "--bias-shift-qmax",
+        type=float,
+        default=1.0,
+        help="Upper quantile bound (0-1) of observed flows used to compute bias shift (default uses all samples).",
+    )
+    parser.add_argument(
+        "--bias-shift-weight-power",
+        type=float,
+        default=0.0,
+        help="Exponent applied to |flow| when weighting samples for bias shift; negative values emphasize low flows.",
+    )
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument("--no-compile", action="store_true")
     parser.add_argument("--no-augment", action="store_true")
     parser.add_argument("--no-ranger", action="store_true")
     parser.add_argument("--output-prefix", default="hydra_v2")
     args = parser.parse_args()
+    quantiles = [float(x) for x in args.quantiles.split(",") if x.strip()]
+    quantile_weights = [float(x) for x in args.quantile_weights.split(",") if x.strip()]
+    if not quantiles:
+        quantile_weights = []
 
     train_eval(
         data_path=args.data,
@@ -688,6 +928,10 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         train_days=args.train_days,
         val_days=args.val_days,
+        train_start=args.train_start,
+        train_end=args.train_end,
+        val_start=args.val_start,
+        val_end=args.val_end,
         patience=args.patience,
         d_model=args.d_model,
         num_heads=args.num_heads,
@@ -695,6 +939,18 @@ if __name__ == "__main__":
         conv_depth=args.conv_depth,
         dropout=args.dropout,
         lr=args.lr,
+        quantiles=quantiles,
+        quantile_weights=quantile_weights,
+        weight_nse=args.weight_nse,
+        weight_quantile=args.weight_quantile,
+        flow_emphasis=args.flow_emphasis,
+        consistency_weight=args.consistency_weight,
+        weight_pbias=args.weight_pbias,
+        residual_bias_weight=args.residual_bias_weight,
+        bias_shift_alpha=args.bias_shift_alpha,
+        bias_shift_qmin=args.bias_shift_qmin,
+        bias_shift_qmax=args.bias_shift_qmax,
+        bias_shift_weight_power=args.bias_shift_weight_power,
         use_amp=not args.no_amp,
         use_compile=not args.no_compile,
         augment=not args.no_augment,
