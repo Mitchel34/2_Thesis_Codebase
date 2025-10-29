@@ -17,4 +17,17 @@ MASTER_STUDY_SITES = {
         'regulation_status': 'Unregulated',
         'data_sources': ['ERA5', 'NWM', 'USGS', 'NLCD'],
     },
+    '04137500': {
+        'name': 'Au Sable River, MI',
+        'full_name': 'Au Sable River, MI',
+        'state': 'MI',
+        'lat': 44.436,
+        'lon': -83.434,
+        'biome': 'Great Lakes mixed forest',
+        'nwm_comid': 2184459,
+        'usgs_id': '04137500',
+        'region': 'Great Lakes',
+        'regulation_status': 'Unregulated',
+        'data_sources': ['ERA5', 'NWM', 'USGS', 'NLCD'],
+    },
 }

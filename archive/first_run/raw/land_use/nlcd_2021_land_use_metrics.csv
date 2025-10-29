@@ -1,2 +1,0 @@
-site_key,site_name,state,latitude,longitude,regulation_status,urban_percent,forest_percent,agriculture_percent,impervious_percent,water_wetlands_percent,data_source,extraction_date,buffer_km,notes
-03479000,"Watauga River, NC",NC,36.215,-81.687,Unregulated,11.91,57.9,15.19,6.99,4.75,NLCD_2021_estimated,2025-09-22,10,Estimated from location and regulation status

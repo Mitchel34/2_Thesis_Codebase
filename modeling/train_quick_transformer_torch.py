@@ -17,6 +17,7 @@ import copy
 import json 
 import math
 import os
+import random
 import time
 from contextlib import nullcontext
 from typing import Dict, List, Optional, Tuple
@@ -242,6 +243,20 @@ def nse_surrogate(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     return torch.sum((pred - target) ** 2) / denom
 
 
+def kge_stabilizer(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    pred_mean = torch.mean(pred)
+    target_mean = torch.mean(target)
+    pred_centered = pred - pred_mean
+    target_centered = target - target_mean
+    pred_std = torch.sqrt(torch.mean(pred_centered**2) + EPS)
+    target_std = torch.sqrt(torch.mean(target_centered**2) + EPS)
+    cov = torch.mean(pred_centered * target_centered)
+    corr = cov / (pred_std * target_std + EPS)
+    alpha = pred_std / (target_std + EPS)
+    beta = pred_mean / (target_mean + EPS)
+    return (corr - 1.0) ** 2 + (alpha - 1.0) ** 2 + (beta - 1.0) ** 2
+
+
 def quantile_pinball(
     pred: torch.Tensor,
     target: torch.Tensor,
@@ -278,24 +293,40 @@ def train_eval(
     flow_emphasis: float = 0.0,
     consistency_weight: float = 1.0,
     weight_pbias: float = 0.0,
+    weight_pbias_final: Optional[float] = None,
     residual_bias_weight: float = 0.0,
     bias_shift_alpha: float = 0.0,
+    bias_shift_pbias_target: float = 5.0,
     bias_shift_qmin: float = 0.0,
     bias_shift_qmax: float = 1.0,
     bias_shift_weight_power: float = 0.0,
+    bias_shift_strategy: str = "scaled",
+    weight_kge: float = 0.0,
+    weight_kge_final: Optional[float] = None,
     use_amp: bool = True,
     use_compile: bool = False,
     augment: bool = True,
     use_ranger: bool = True,
     output_prefix: str = "hydra_v2",
+    seed: Optional[int] = None,
 ) -> None:
     torch.set_float32_matmul_precision("medium")
+    if seed is not None:
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
     quantiles = list(quantiles) if quantiles else []
     if quantiles and quantile_weights and len(quantile_weights) != len(quantiles):
         raise ValueError("quantile_weights must match the number of quantile levels")
     if quantiles and not quantile_weights:
         quantile_weights = [1.0 for _ in quantiles]
     quantile_weights = list(quantile_weights) if quantile_weights else []
+    def _scheduled_weight(start: float, final: Optional[float], progress: float) -> float:
+        if final is None:
+            return start
+        return float(start + (final - start) * progress)
     df = load_data(data_path)
     site_cols = [c for c in ("site_name", "comid") if c in df.columns]
     if site_cols:
@@ -523,6 +554,9 @@ def train_eval(
     overall_start = time.time()
     for epoch in range(epochs):
         epoch_start = time.time()
+        progress = epoch / max(epochs - 1, 1)
+        curr_weight_pbias = _scheduled_weight(weight_pbias, weight_pbias_final, progress)
+        curr_weight_kge = _scheduled_weight(weight_kge, weight_kge_final, progress)
         model.train()
         running_loss = 0.0
         sample_count = 0
@@ -559,12 +593,22 @@ def train_eval(
                 loss_corr = (corr_nll * corr_weights).mean()
                 loss = loss_res + loss_corr + consistency_weight * mse(pred_corr_t, y_usgs_t)
 
-                if weight_pbias > 0:
-                    pbias_raw = torch.abs(torch.mean(corr_from_res - y_usgs)) / (torch.mean(torch.abs(y_usgs)) + EPS)
-                    loss = loss + weight_pbias * pbias_raw
+                if curr_weight_pbias > 0:
+                    numer = torch.sum(corr_from_res - y_usgs)
+                    denom = torch.sum(y_usgs)
+                    pbias_percent = torch.where(
+                        torch.abs(denom) > EPS,
+                        100.0 * numer / denom,
+                        torch.zeros_like(denom),
+                    )
+                    pbias_penalty = torch.abs(pbias_percent) / 100.0
+                    loss = loss + curr_weight_pbias * pbias_penalty
 
                 if weight_nse > 0:
                     loss = loss + weight_nse * nse_surrogate(corr_from_res, y_usgs)
+
+                if curr_weight_kge > 0:
+                    loss = loss + curr_weight_kge * kge_stabilizer(corr_from_res, y_usgs)
 
                 if residual_bias_weight > 0:
                     mean_bias = torch.mean(corr_from_res - y_usgs)
@@ -641,11 +685,20 @@ def train_eval(
                     corr_nll = gaussian_nll(pred_corr_t, logvar_corr, y_usgs_t)
                     loss_corr = (corr_nll * corr_weights).mean()
                     loss = loss_res + loss_corr + consistency_weight * mse(pred_corr_t, y_usgs_t)
-                    if weight_pbias > 0:
-                        pbias_raw = torch.abs(torch.mean(corr_from_res - y_usgs)) / (torch.mean(torch.abs(y_usgs)) + EPS)
-                        loss = loss + weight_pbias * pbias_raw
+                    if curr_weight_pbias > 0:
+                        numer = torch.sum(corr_from_res - y_usgs)
+                        denom = torch.sum(y_usgs)
+                        pbias_percent = torch.where(
+                            torch.abs(denom) > EPS,
+                            100.0 * numer / denom,
+                            torch.zeros_like(denom),
+                        )
+                        pbias_penalty = torch.abs(pbias_percent) / 100.0
+                        loss = loss + curr_weight_pbias * pbias_penalty
                     if weight_nse > 0:
                         loss = loss + weight_nse * nse_surrogate(corr_from_res, y_usgs)
+                    if curr_weight_kge > 0:
+                        loss = loss + curr_weight_kge * kge_stabilizer(corr_from_res, y_usgs)
                     if residual_bias_weight > 0:
                         mean_bias = torch.mean(corr_from_res - y_usgs)
                         norm = torch.mean(torch.abs(y_usgs)) + EPS
@@ -703,7 +756,8 @@ def train_eval(
     total_training_time = time.time() - overall_start
     print(f"Training complete in {total_training_time/60:.2f} minutes")
 
-    if bias_shift_alpha > 0 and val_loader is not None:
+    bias_shift_info = None
+    if (bias_shift_strategy in {"scaled", "full"} and (bias_shift_alpha > 0 or bias_shift_strategy == "full")) and val_loader is not None:
         bias_diffs: List[np.ndarray] = []
         flow_samples: List[np.ndarray] = []
         with torch.no_grad():
@@ -734,6 +788,20 @@ def train_eval(
                 low = np.quantile(flow_vec, qmin)
                 high = np.quantile(flow_vec, qmax)
                 mask = (flow_vec >= low) & (flow_vec <= high)
+            sample_count = int(np.count_nonzero(mask))
+            bias_shift_info = {
+                "strategy": bias_shift_strategy,
+                "alpha": float(bias_shift_alpha),
+                "qmin": qmin,
+                "qmax": qmax,
+                "weight_power": float(bias_shift_weight_power),
+                "applied": 0.0,
+                "mean_bias": None,
+                "pbias_percent": None,
+                "scale": None,
+                "samples": sample_count,
+                "status": "skipped",
+            }
             if np.any(mask):
                 weights = np.ones_like(diff_vec, dtype=np.float64)
                 if abs(bias_shift_weight_power) > 1e-8:
@@ -741,15 +809,36 @@ def train_eval(
                     weights = (np.abs(flow_vec) + EPS) ** bias_shift_weight_power
                 weights = weights[mask]
                 bias_slice = diff_vec[mask]
+                flow_slice = flow_vec[mask]
                 weight_sum = np.sum(weights)
                 if weight_sum > 0 and bias_slice.size > 0:
                     mean_bias = float(np.sum(bias_slice * weights) / weight_sum)
-                    shift = bias_shift_alpha * mean_bias
+                    denom = float(np.sum(flow_slice * weights))
+                    if abs(denom) < EPS:
+                        pbias_percent = None
+                        scale = 1.0
+                    else:
+                        pbias_percent = 100.0 * float(np.sum(bias_slice * weights) / denom)
+                        target = max(bias_shift_pbias_target, 1e-3)
+                        scale = float(np.clip(abs(pbias_percent) / target, 0.2, 1.25))
+                    if bias_shift_strategy == "full":
+                        shift = mean_bias * scale
+                    else:
+                        shift = bias_shift_alpha * scale * mean_bias
                     model.residual_bias.data -= torch.tensor(shift, device=model.residual_bias.data.device)
+                    bias_shift_info.update(
+                        {
+                            "applied": float(shift),
+                            "mean_bias": float(mean_bias),
+                            "pbias_percent": None if pbias_percent is None else float(pbias_percent),
+                            "scale": float(scale),
+                            "status": "applied",
+                        }
+                    )
                     print(
-                        "Applied scaled residual bias shift: "
-                        f"{shift:+.4f} (alpha={bias_shift_alpha}, q=[{qmin:.2f},{qmax:.2f}], "
-                        f"weight_pow={bias_shift_weight_power:.2f})"
+                        "Applied residual bias shift: "
+                        f"{shift:+.4f} (strategy={bias_shift_strategy}, alpha={bias_shift_alpha}, "
+                        f"scale={scale:.2f}, q=[{qmin:.2f},{qmax:.2f}], weight_pow={bias_shift_weight_power:.2f})"
                     )
                 else:
                     print("Skipped residual bias shift (insufficient weighted samples).")
@@ -846,6 +935,21 @@ def train_eval(
                 out[k] = float(v)
         return out
 
+    if bias_shift_info is None:
+        bias_shift_info = {
+            "strategy": bias_shift_strategy,
+            "alpha": float(bias_shift_alpha),
+            "qmin": float(np.clip(bias_shift_qmin, 0.0, 1.0)),
+            "qmax": float(np.clip(bias_shift_qmax, 0.0, 1.0)),
+            "weight_power": float(bias_shift_weight_power),
+            "applied": 0.0,
+            "mean_bias": None,
+            "pbias_percent": None,
+            "scale": None,
+            "samples": 0,
+            "status": "no_validation" if val_loader is None else "not_applied",
+        }
+
     metrics_payload = {
         "baseline": _clean_dict(baseline_metrics),
         "corrected": _clean_dict(corrected_metrics),
@@ -855,6 +959,7 @@ def train_eval(
     }
     if quantile_metrics:
         metrics_payload["quantiles"] = quantile_metrics
+    metrics_payload["bias_shift"] = bias_shift_info
 
     with open(os.path.join(out_dir, f"{output_prefix}_metrics.json"), "w") as fh:
         json.dump(metrics_payload, fh, indent=2)
@@ -889,9 +994,26 @@ if __name__ == "__main__":
     parser.add_argument("--weight-quantile", type=float, default=0.1, help="Weight for quantile pinball loss")
     parser.add_argument("--flow-emphasis", type=float, default=0.3, help="Emphasis factor for high-flow weighting")
     parser.add_argument("--consistency-weight", type=float, default=1.0, help="Weight tying corrected predictions to nwm + residual")
-    parser.add_argument("--weight-pbias", type=float, default=0.05, help="Weight for absolute PBIAS penalty in raw space")
+    parser.add_argument(
+        "--weight-pbias",
+        type=float,
+        default=0.05,
+        help="Weight for absolute percent-bias penalty (matches reported PBIAS metric)",
+    )
+    parser.add_argument(
+        "--weight-pbias-final",
+        type=float,
+        default=None,
+        help="Optional final percent-bias weight; if set, interpolates from --weight-pbias to this value over epochs",
+    )
     parser.add_argument("--residual-bias-weight", type=float, default=0.0, help="Weight for squared mean bias penalty")
     parser.add_argument("--bias-shift-alpha", type=float, default=0.0, help="Post-training bias correction factor (0=off)")
+    parser.add_argument(
+        "--bias-shift-pbias-target",
+        type=float,
+        default=5.0,
+        help="Target percent bias magnitude (validation) used to scale adaptive residual shifts",
+    )
     parser.add_argument(
         "--bias-shift-qmin",
         type=float,
@@ -910,11 +1032,30 @@ if __name__ == "__main__":
         default=0.0,
         help="Exponent applied to |flow| when weighting samples for bias shift; negative values emphasize low flows.",
     )
+    parser.add_argument(
+        "--bias-shift-strategy",
+        choices=["scaled", "full"],
+        default="scaled",
+        help="Selects how the validation bias is converted to a shift: 'scaled' multiplies by alpha; 'full' removes the entire measured bias.",
+    )
+    parser.add_argument(
+        "--weight-kge",
+        type=float,
+        default=0.05,
+        help="Weight for gentle KGE stabilisation (0 disables)",
+    )
+    parser.add_argument(
+        "--weight-kge-final",
+        type=float,
+        default=None,
+        help="Optional final KGE weight; if set, interpolates from --weight-kge to this value over epochs",
+    )
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument("--no-compile", action="store_true")
     parser.add_argument("--no-augment", action="store_true")
     parser.add_argument("--no-ranger", action="store_true")
     parser.add_argument("--output-prefix", default="hydra_v2")
+    parser.add_argument("--seed", type=int, default=None)
     args = parser.parse_args()
     quantiles = [float(x) for x in args.quantiles.split(",") if x.strip()]
     quantile_weights = [float(x) for x in args.quantile_weights.split(",") if x.strip()]
@@ -946,14 +1087,20 @@ if __name__ == "__main__":
         flow_emphasis=args.flow_emphasis,
         consistency_weight=args.consistency_weight,
         weight_pbias=args.weight_pbias,
+        weight_pbias_final=args.weight_pbias_final,
         residual_bias_weight=args.residual_bias_weight,
         bias_shift_alpha=args.bias_shift_alpha,
+        bias_shift_pbias_target=args.bias_shift_pbias_target,
         bias_shift_qmin=args.bias_shift_qmin,
         bias_shift_qmax=args.bias_shift_qmax,
         bias_shift_weight_power=args.bias_shift_weight_power,
+        bias_shift_strategy=args.bias_shift_strategy,
+        weight_kge=args.weight_kge,
+        weight_kge_final=args.weight_kge_final,
         use_amp=not args.no_amp,
         use_compile=not args.no_compile,
         augment=not args.no_augment,
         use_ranger=not args.no_ranger,
         output_prefix=args.output_prefix,
+        seed=args.seed,
     )

@@ -1,0 +1,40 @@
+{
+  "command": "PYTHONPATH=. python modeling/train_quick_transformer_torch.py --data data/clean/modeling/hourly_training_2010-01-01_2022-12-31.parquet --seq-len 168 --epochs 15 --batch-size 64 --patience 4 --d-model 64 --num-heads 4 --num-layers 2 --dropout 0.1 --lr 3e-4 --weight-nse 0.1 --weight-quantile 0.05 --flow-emphasis 0.1 --consistency-weight 1.0 --weight-pbias 0.0 --output-prefix baseline_gru_resonly_short --no-compile --no-augment --no-ranger",
+  "metrics": {
+    "baseline": {
+      "rmse": 5.971522001227854,
+      "mae": 1.7772712879674828,
+      "nse": 0.5188793817601274,
+      "kge": 0.6385862839423266,
+      "pbias": -5.994797959062143,
+      "pearson_r": 0.7229607279606824,
+      "spearman_r": 0.8319274069321457
+    },
+    "corrected": {
+      "rmse": 5.238602457455753,
+      "mae": 1.382926745520654,
+      "nse": 0.6297331938060866,
+      "kge": 0.6186238628407226,
+      "pbias": -11.252429045432839,
+      "pearson_r": 0.8033702228265871,
+      "spearman_r": 0.9096802622335343
+    },
+    "rmse_residual": 5.238602638244629,
+    "rmse_improvement_pct": 12.273580229988259,
+    "output_prefix": "baseline_gru_resonly_short",
+    "quantiles": {
+      "0.10": {
+        "coverage": 0.13504595804855055,
+        "bias": -1.8087480068206787
+      },
+      "0.50": {
+        "coverage": 0.6574357765731793,
+        "bias": -0.137551948428154
+      },
+      "0.90": {
+        "coverage": 0.96853641291539,
+        "bias": 3.717679262161255
+      }
+    }
+  }
+}

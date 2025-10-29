@@ -11,6 +11,7 @@ import copy
 import json
 import math
 import os
+from pathlib import Path
 from contextlib import nullcontext
 from typing import Dict
 
@@ -29,11 +30,17 @@ from modeling.train_quick_transformer_torch import (
     SeqDataset,
     add_static_columns,
     compute_hydro_metrics,
-    focal_mse,
     load_data,
     prepare_features,
     ERA5_CANDIDATES,
 )
+
+
+def focal_mse(pred: torch.Tensor, target: torch.Tensor, gamma: float = 2.0, threshold: float = 1.0) -> torch.Tensor:
+    """Focalised mean-squared error that down-weights small residuals."""
+    diff = pred - target
+    scale = torch.pow(torch.abs(diff) / (threshold + 1e-6) + 1.0, gamma)
+    return torch.mean((diff**2) / scale)
 
 
 class ResidualLSTMModel(nn.Module):
@@ -114,6 +121,7 @@ def train_eval(
     focal_gamma: float = 2.0,
     focal_std_factor: float = 2.0,
     use_ranger: bool = True,
+    output_prefix: str = "quick_lstm",
 ) -> None:
     torch.set_float32_matmul_precision("medium")
     df = load_data(data_path)
@@ -276,8 +284,8 @@ def train_eval(
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     mse = nn.MSELoss()
 
-    amp_enabled = use_amp and device.type in ('cuda', 'mps')
-    amp_dtype = torch.bfloat16 if device.type == 'mps' else torch.float16
+    amp_enabled = use_amp and device.type == 'cuda'
+    amp_dtype = torch.float16
     scaler = torch.cuda.amp.GradScaler() if amp_enabled and device.type == 'cuda' else None
 
     best_state = copy.deepcopy(model.state_dict())
@@ -446,10 +454,11 @@ def train_eval(
 
     print(f"ΔRMSE% (Corrected vs Baseline): {rel_improve:.2f}%")
 
-    out_dir = 'data/clean/modeling'
-    os.makedirs(out_dir, exist_ok=True)
-    np.save(os.path.join(out_dir, 'quick_lstm_pred.npy'), pred_residual)
-    np.save(os.path.join(out_dir, 'quick_lstm_true.npy'), true_residual)
+    out_dir = Path('data/clean/modeling')
+    out_dir.mkdir(parents=True, exist_ok=True)
+    base_name = output_prefix
+    np.save(out_dir / f'{base_name}_pred.npy', pred_residual)
+    np.save(out_dir / f'{base_name}_true.npy', true_residual)
 
     timestamps = df.loc[test_mask, 'timestamp'].to_numpy()
     aligned_len = min(len(timestamps), len(corrected_pred))
@@ -462,7 +471,7 @@ def train_eval(
         'corrected_pred_cms': corrected_pred[:aligned_len],
         'corrected_true_cms': true_usgs[:aligned_len],
     })
-    result_df.to_csv(os.path.join(out_dir, 'quick_lstm_eval.csv'), index=False)
+    result_df.to_csv(out_dir / f'{base_name}_eval.csv', index=False)
 
     def _clean_dict(d: Dict[str, float]) -> Dict[str, float | None]:
         out: Dict[str, float | None] = {}
@@ -480,10 +489,11 @@ def train_eval(
         'rmse_improvement_pct': None if np.isnan(rel_improve) else float(rel_improve),
     }
 
-    with open(os.path.join(out_dir, 'quick_lstm_metrics.json'), 'w') as fh:
+    metrics_payload['output_prefix'] = base_name
+    with open(out_dir / f'{base_name}_metrics.json', 'w') as fh:
         json.dump(metrics_payload, fh, indent=2)
 
-    with open(os.path.join(out_dir, 'quick_lstm_features.txt'), 'w') as fh:
+    with open(out_dir / f'{base_name}_features.txt', 'w') as fh:
         fh.write("Dynamic columns:\n")
         fh.write("\n".join(dynamic_cols))
         if static_cols:
@@ -511,6 +521,7 @@ if __name__ == '__main__':
     parser.add_argument('--focal-gamma', type=float, default=2.0)
     parser.add_argument('--focal-std-factor', type=float, default=2.0)
     parser.add_argument('--no-ranger', action='store_true')
+    parser.add_argument('--output-prefix', default='quick_lstm')
     args = parser.parse_args()
 
     train_eval(
@@ -532,4 +543,5 @@ if __name__ == '__main__':
         focal_gamma=args.focal_gamma,
         focal_std_factor=args.focal_std_factor,
         use_ranger=not args.no_ranger,
+        output_prefix=args.output_prefix,
     )

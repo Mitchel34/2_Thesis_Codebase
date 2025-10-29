@@ -1,0 +1,40 @@
+{
+  "command": "PYTHONPATH=. python modeling/train_quick_transformer_torch.py --data data/clean/modeling/hourly_training_2010-01-01_2022-12-31.parquet --seq-len 168 --epochs 18 --batch-size 64 --patience 5 --d-model 64 --num-heads 4 --num-layers 2 --dropout 0.1 --lr 3e-4 --weight-nse 0.2 --weight-quantile 0.05 --flow-emphasis 0.2 --consistency-weight 2.5 --weight-pbias 0.0 --output-prefix baseline_gru_cons25_flow02 --no-compile --no-augment --no-ranger",
+  "metrics": {
+    "baseline": {
+      "rmse": 5.971522001227854,
+      "mae": 1.7772712879674828,
+      "nse": 0.5188793817601274,
+      "kge": 0.6385862839423266,
+      "pbias": -5.994797959062143,
+      "pearson_r": 0.7229607279606824,
+      "spearman_r": 0.8319274069321457
+    },
+    "corrected": {
+      "rmse": 5.147432634372524,
+      "mae": 1.3704052835302536,
+      "nse": 0.6425088963922078,
+      "kge": 0.6576337031540371,
+      "pbias": -11.73621563340155,
+      "pearson_r": 0.8064505073685749,
+      "spearman_r": 0.9185617193216585
+    },
+    "rmse_residual": 5.147432327270508,
+    "rmse_improvement_pct": 13.80032371455522,
+    "output_prefix": "baseline_gru_cons25_flow02",
+    "quantiles": {
+      "0.10": {
+        "coverage": 0.03759132689135046,
+        "bias": -2.2920234203338623
+      },
+      "0.50": {
+        "coverage": 0.3907612538298374,
+        "bias": -0.9143304228782654
+      },
+      "0.90": {
+        "coverage": 0.8719066698090974,
+        "bias": 2.2158942222595215
+      }
+    }
+  }
+}

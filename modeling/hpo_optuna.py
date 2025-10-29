@@ -48,13 +48,19 @@ def objective(trial: optuna.Trial, args: argparse.Namespace) -> float:
     # Sample hyperparameters.
     d_model = trial.suggest_categorical("d_model", [96, 128])
     num_layers = trial.suggest_int("num_layers", 3, 4)
-    num_heads = trial.suggest_categorical("num_heads", [4, 8])
-    conv_depth = trial.suggest_int("conv_depth", 3, 4)
-    dropout = trial.suggest_float("dropout", 0.08, 0.16)
-    lr = trial.suggest_float("lr", 2e-4, 5e-4, log=True)
+    num_heads = trial.suggest_categorical("num_heads", [4, 6])
+    if d_model == 128 and num_heads != 4:
+        raise optuna.TrialPruned("num_heads must divide d_model")
+    conv_depth = trial.suggest_int("conv_depth", 2, 3)
+    dropout = trial.suggest_float("dropout", 0.05, 0.12)
+    lr = trial.suggest_float("lr", 1e-4, 3e-4, log=True)
     seq_len = trial.suggest_categorical("seq_len", [168, 240])
 
-    quantiles = [0.1, 0.5, 0.9]
+    weight_nse = trial.suggest_float("weight_nse", args.weight_nse_range[0], args.weight_nse_range[1])
+    weight_quantile = trial.suggest_float("weight_quantile", args.weight_quantile_range[0], args.weight_quantile_range[1])
+    flow_emphasis = trial.suggest_float("flow_emphasis", args.flow_emphasis_range[0], args.flow_emphasis_range[1])
+    consistency_weight = trial.suggest_float("consistency_weight", args.consistency_weight_range[0], args.consistency_weight_range[1])
+    weight_pbias = trial.suggest_float("weight_pbias", args.weight_pbias_range[0], args.weight_pbias_range[1])
 
     # Train the model with sampled hyperparameters.
     trial_prefix = f"{args.output_prefix}_trial{trial.number}"
@@ -72,6 +78,12 @@ def objective(trial: optuna.Trial, args: argparse.Namespace) -> float:
         conv_depth=conv_depth,
         dropout=dropout,
         lr=lr,
+        quantiles=args.quantiles,
+        weight_nse=weight_nse,
+        weight_quantile=weight_quantile,
+        flow_emphasis=flow_emphasis,
+        consistency_weight=consistency_weight,
+        weight_pbias=weight_pbias,
         use_amp=not args.no_amp,
         use_compile=False,
         augment=not args.no_augment,
@@ -113,6 +125,16 @@ def create_study(args: argparse.Namespace) -> optuna.Study:
     return study
 
 
+def _parse_range(value: str, name: str) -> tuple[float, float]:
+    try:
+        lo, hi = (float(x) for x in value.split(","))
+    except Exception as exc:  # pragma: no cover
+        raise argparse.ArgumentTypeError(f"{name} must be 'low,high' (float)") from exc
+    if lo < 0 or hi < 0 or lo > hi:
+        raise argparse.ArgumentTypeError(f"{name} must satisfy 0 <= low <= high")
+    return lo, hi
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Hydra v2 Optuna hyperparameter search")
     parser.add_argument("--data", required=True, help="Path to cleaned modeling parquet")
@@ -127,6 +149,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--moe-experts", type=int, default=3)
     parser.add_argument("--output-prefix", default="hydra_v2_optuna")
     parser.add_argument("--seed", type=int, default=123)
+    parser.add_argument("--quantiles", default="0.1,0.5,0.9", help="Comma-separated quantile levels")
+    parser.add_argument("--weight-nse-range", default="0.05,0.35", help="Search range for NSE surrogate weight")
+    parser.add_argument("--weight-quantile-range", default="0.05,0.25", help="Search range for quantile loss weight")
+    parser.add_argument("--flow-emphasis-range", default="0.05,0.4", help="Search range for flow emphasis factor")
+    parser.add_argument("--consistency-weight-range", default="0.5,3.0", help="Search range for corrected-vs-residual consistency weight")
+    parser.add_argument("--weight-pbias-range", default="0.0,0.05", help="Search range for PBIAS penalty weight")
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument("--no-augment", action="store_true")
     parser.add_argument("--no-ranger", action="store_true")
@@ -135,6 +163,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    args.quantiles = [float(x) for x in args.quantiles.split(",") if x.strip()]
+    args.weight_nse_range = _parse_range(args.weight_nse_range, "weight-nse-range")
+    args.weight_quantile_range = _parse_range(args.weight_quantile_range, "weight-quantile-range")
+    args.flow_emphasis_range = _parse_range(args.flow_emphasis_range, "flow-emphasis-range")
+    args.consistency_weight_range = _parse_range(args.consistency_weight_range, "consistency-weight-range")
+    args.weight_pbias_range = _parse_range(args.weight_pbias_range, "weight-pbias-range")
     os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
     study = create_study(args)
