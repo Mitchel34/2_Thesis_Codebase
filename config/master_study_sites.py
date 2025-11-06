@@ -30,4 +30,17 @@ MASTER_STUDY_SITES = {
         'regulation_status': 'Unregulated',
         'data_sources': ['ERA5', 'NWM', 'USGS', 'NLCD'],
     },
+    '09234500': {
+        'name': 'Green River, WY',
+        'full_name': 'Green River, WY',
+        'state': 'WY',
+        'lat': 40.908,
+        'lon': -109.423,
+        'biome': 'Intermountain',
+        'nwm_comid': 17956545,
+        'usgs_id': '09234500',
+        'region': 'Mountain West',
+        'regulation_status': 'Regulated',
+        'data_sources': ['ERA5', 'USGS', 'NLCD'],
+    },
 }

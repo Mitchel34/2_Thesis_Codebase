@@ -30,7 +30,7 @@ import os
 import glob
 import pandas as pd
 import numpy as np
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Iterable
 
 from datetime import datetime
 

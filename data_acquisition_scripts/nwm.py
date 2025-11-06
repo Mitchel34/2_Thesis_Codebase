@@ -37,7 +37,7 @@ import logging
 import sys
 import argparse
 from datetime import datetime, timedelta
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Iterable
 import warnings
 warnings.filterwarnings('ignore')
 import tempfile
@@ -192,7 +192,7 @@ logger = logging.getLogger(__name__)
 class NWMHourlyCollector:
     """Collects hourly NWM operational data using short-range forecasts"""
     
-    def __init__(self, data_dir="data/raw/nwm_v3"):
+    def __init__(self, data_dir="data/raw/nwm_v3", site_ids: Optional[Iterable[str]] = None):
         self.data_dir = data_dir
         self.operational_bucket = 'noaa-nwm-pds'
         # Anonymous access to public NOAA bucket
@@ -202,13 +202,33 @@ class NWMHourlyCollector:
             config=Config(signature_version=UNSIGNED)
         )
         
-        # Setup study sites
-        self.study_sites = [
-            {'name': site_info['name'], 'comid': site_info['nwm_comid']} 
-            for site_id, site_info in MASTER_STUDY_SITES.items() if site_info.get('nwm_comid')
-        ]
+        # Setup study sites (optionally filtered)
+        if site_ids:
+            selected = {
+                sid: MASTER_STUDY_SITES[sid]
+                for sid in site_ids
+                if sid in MASTER_STUDY_SITES
+            }
+            if not selected:
+                raise ValueError(f"Requested sites {site_ids} not found in MASTER_STUDY_SITES")
+        else:
+            selected = MASTER_STUDY_SITES
+
+        self.study_sites = []
+        for site_id, site_info in selected.items():
+            comid = site_info.get('nwm_comid')
+            name = site_info.get('name', site_id)
+            if comid is None:
+                continue
+            self.study_sites.append({'name': name, 'comid': comid, 'usgs_id': site_id})
+
+        if not self.study_sites:
+            raise ValueError("No study sites with valid NWM COMIDs were selected.")
+
         self.target_comids = [site['comid'] for site in self.study_sites]
-        
+        site_ids_sorted = sorted({site['usgs_id'] for site in self.study_sites if site.get('usgs_id')})
+        self.site_suffix = f"_{'_'.join(site_ids_sorted)}" if site_ids_sorted else ""
+
         logger.info(f"✅ Initialized NWM hourly collector for {len(self.study_sites)} sites")
         logger.info(f"🎯 Target COMIDs: {self.target_comids}")
 
@@ -292,7 +312,7 @@ class NWMHourlyCollector:
         os.makedirs(out_dir, exist_ok=True)
         out_file = os.path.join(
             out_dir,
-            f"nwm_v3_hourly_analysis_assim_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}.csv"
+            f"nwm_v3_hourly_analysis_assim_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}{self.site_suffix}.csv"
         )
         df.to_csv(out_file, index=False, date_format='%Y-%m-%d %H:%M:%S')
         logger.info(f"💾 Saved analysis_assim hourly CSV: {out_file} (rows={len(df)})")
@@ -369,7 +389,7 @@ class NWMHourlyCollector:
         os.makedirs(out_dir, exist_ok=True)
         out_file = os.path.join(
             out_dir,
-            f"nwm_v3_hourly_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}.csv"
+            f"nwm_v3_hourly_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}{self.site_suffix}.csv"
         )
         all_df.to_csv(out_file, index=False, date_format='%Y-%m-%d %H:%M:%S')
         logger.info(f"💾 Saved unified v3 hourly (auto) CSV: {out_file} (rows={len(all_df)})")
@@ -456,7 +476,7 @@ class NWMHourlyCollector:
             # Name file by requested date range
             output_file = os.path.join(
                 output_dir,
-                f"nwm_v3_hourly_operational_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}.csv"
+                f"nwm_v3_hourly_operational_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}{self.site_suffix}.csv"
             )
             df.to_csv(output_file, index=False, date_format='%Y-%m-%d %H:%M:%S')
             
@@ -591,7 +611,7 @@ class NWMHourlyCollector:
         os.makedirs(out_dir, exist_ok=True)
         out_file = os.path.join(
             out_dir,
-            f"nwm_v3_hourly_archive_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}.csv"
+            f"nwm_v3_hourly_archive_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}{self.site_suffix}.csv"
         )
         df.to_csv(out_file, index=False)
         logger.info(f"💾 Saved archive hourly CSV: {out_file} (rows={len(df)})")
@@ -708,7 +728,7 @@ class NWMHourlyCollector:
         os.makedirs(out_dir, exist_ok=True)
         out_file = os.path.join(
             out_dir,
-            f"nwm_v3_hourly_{pd.to_datetime(start_dt).strftime('%Y%m%d')}_{pd.to_datetime(end_dt).strftime('%Y%m%d')}.csv"
+            f"nwm_v3_hourly_{pd.to_datetime(start_dt).strftime('%Y%m%d')}_{pd.to_datetime(end_dt).strftime('%Y%m%d')}{self.site_suffix}.csv"
         )
         already = set()
         if resume and os.path.exists(out_file):
@@ -994,6 +1014,7 @@ def main():
     parser.add_argument("--checkpoint-every", type=int, default=200, help="Flush rows to CSV every N records (retrospective_v3).")
     parser.add_argument("--resume", action="store_true", default=True, help="Resume and skip timestamps already present in output CSV (retrospective_v3). Default: True")
     parser.add_argument("--concurrency", choices=["thread", "process"], default="process", help="Concurrency model for retrospective_v3: threads (fast but may segfault with HDF5) or processes (safer). Default: process")
+    parser.add_argument("--sites", nargs='+', default=None, help="USGS site IDs to process (default: all sites in configuration)")
     args = parser.parse_args()
 
     logger.info("🔄 STARTING HOURLY NWM DATA COLLECTION")
@@ -1003,7 +1024,7 @@ def main():
     
     try:
         # Initialize collector
-        collector = NWMHourlyCollector(data_dir=args.out_dir)
+        collector = NWMHourlyCollector(data_dir=args.out_dir, site_ids=args.sites)
         
         if args.mode == "operational":
             # Collect hourly operational data
