@@ -13,13 +13,20 @@ __pycache__/
 .vscode/
 .idea/
 
-# Generated data artifacts
+# Generated data & experiment artifacts
 /data/clean/
 /data/raw/
 /results/
+/archive/
+/artifacts/
+/figs/
+/logs/
+/local_only/*
+!/local_only/.gitkeep
+!/local_only/README.md
+/hydra_v*_optuna_*
 
 # Logs and checkpoints
-/logs/
 *.log
 
 # Misc

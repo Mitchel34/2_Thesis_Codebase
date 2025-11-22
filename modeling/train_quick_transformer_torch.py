@@ -33,7 +33,8 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     Ranger = None
 
-from modeling.models.hydra_temporal import HydraTemporalModel
+from modeling.models.hydra_temporal import HydraTemporalModel as HydraTemporalV2
+from modeling.models.hydra_temporal_v1 import HydraTemporalModel as HydraTemporalV1
 
 ERA5_CANDIDATES = [
     "temp_c",
@@ -77,6 +78,39 @@ def transform_np(x: np.ndarray) -> np.ndarray:
 
 def inverse_transform_np(x: np.ndarray) -> np.ndarray:
     return np.sinh(x)
+
+
+def _has_gaussian_heads(outputs: Dict[str, torch.Tensor]) -> bool:
+    required = {"residual_mean", "residual_logvar", "corrected_logvar"}
+    return required.issubset(outputs.keys())
+
+
+def _unpack_predictions(outputs: Dict[str, torch.Tensor], y_nwm: torch.Tensor) -> Tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    bool,
+    Optional[torch.Tensor],
+    Optional[torch.Tensor],
+]:
+    has_gaussian = _has_gaussian_heads(outputs)
+    if has_gaussian:
+        pred_res_t = outputs["residual_mean"]
+        pred_res_raw = inverse_transform(pred_res_t)
+        logvar_res = outputs["residual_logvar"]
+        logvar_corr = outputs["corrected_logvar"]
+    elif "residual" in outputs:
+        pred_res_raw = outputs["residual"]
+        pred_res_t = transform_target(pred_res_raw)
+        logvar_res = None
+        logvar_corr = None
+    else:
+        raise KeyError("Model outputs must contain residual predictions")
+
+    corr_from_res = outputs.get("corrected", y_nwm + pred_res_raw)
+    pred_corr_t = transform_target(corr_from_res)
+    return pred_res_raw, pred_res_t, corr_from_res, pred_corr_t, has_gaussian, logvar_res, logvar_corr
 
 
 class SeqDataset(Dataset):
@@ -309,6 +343,8 @@ def train_eval(
     use_ranger: bool = True,
     output_prefix: str = "hydra_v2",
     seed: Optional[int] = None,
+    model_arch: str = "hydra_v2",
+    patch_size: int = 14,
 ) -> None:
     torch.set_float32_matmul_precision("medium")
     if seed is not None:
@@ -501,19 +537,37 @@ def train_eval(
     )
     test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, pin_memory=pin_memory)
 
-    model = HydraTemporalModel(
-        input_dim=len(dynamic_cols),
-        static_dim=len(static_cols),
-        d_model=d_model,
-        num_heads=num_heads,
-        num_layers=num_layers,
-        seq_len=seq_len,
-        conv_depth=conv_depth,
-        dropout=dropout,
-        quantiles=quantiles if quantiles else None,
-        nwm_index=0,
-        patch_size=1,
-    )
+    arch = model_arch.lower()
+    if arch == "hydra_v2":
+        model = HydraTemporalV2(
+            input_dim=len(dynamic_cols),
+            static_dim=len(static_cols),
+            d_model=d_model,
+            num_heads=num_heads,
+            num_layers=num_layers,
+            seq_len=seq_len,
+            conv_depth=conv_depth,
+            dropout=dropout,
+            quantiles=quantiles if quantiles else None,
+            nwm_index=0,
+            patch_size=1,
+        )
+    elif arch == "hydra_v1":
+        model = HydraTemporalV1(
+            input_dim=len(dynamic_cols),
+            static_dim=len(static_cols),
+            d_model=d_model,
+            num_heads=num_heads,
+            num_layers=num_layers,
+            seq_len=seq_len,
+            conv_depth=conv_depth,
+            dropout=dropout,
+            quantiles=quantiles if quantiles else None,
+            nwm_index=0,
+            patch_size=max(1, patch_size),
+        )
+    else:
+        raise ValueError(f"Unsupported model_arch '{model_arch}'. Choose 'hydra_v2' or 'hydra_v1'.")
 
     if use_compile:
         try:
@@ -580,17 +634,26 @@ def train_eval(
                 y_res_t = transform_target(y_res)
                 y_usgs_t = transform_target(y_usgs)
 
-                pred_res_t = outputs["residual_mean"]
-                logvar_res = outputs["residual_logvar"]
-                loss_res = gaussian_nll(pred_res_t, logvar_res, y_res_t).mean()
+                (
+                    pred_res_raw,
+                    pred_res_t,
+                    corr_from_res,
+                    pred_corr_t,
+                    has_gaussian_heads,
+                    logvar_res,
+                    logvar_corr,
+                ) = _unpack_predictions(outputs, y_nwm)
 
-                logvar_corr = outputs["corrected_logvar"]
-                pred_res_raw = inverse_transform(pred_res_t)
-                corr_from_res = y_nwm + pred_res_raw
-                pred_corr_t = transform_target(corr_from_res)
-                corr_nll = gaussian_nll(pred_corr_t, logvar_corr, y_usgs_t)
                 corr_weights = flow_weighting(y_usgs, flow_emphasis)
-                loss_corr = (corr_nll * corr_weights).mean()
+                if has_gaussian_heads and logvar_res is not None and logvar_corr is not None:
+                    loss_res = gaussian_nll(pred_res_t, logvar_res, y_res_t).mean()
+                    corr_nll = gaussian_nll(pred_corr_t, logvar_corr, y_usgs_t)
+                    loss_corr = (corr_nll * corr_weights).mean()
+                else:
+                    loss_res = mse(pred_res_t, y_res_t)
+                    corr_mse = (pred_corr_t - y_usgs_t) ** 2
+                    loss_corr = (corr_mse * corr_weights).mean()
+
                 loss = loss_res + loss_corr + consistency_weight * mse(pred_corr_t, y_usgs_t)
 
                 if curr_weight_pbias > 0:
@@ -672,18 +735,26 @@ def train_eval(
                     outputs = model(xb, sb if sb.numel() else None)
                     y_res_t = transform_target(y_res)
                     y_usgs_t = transform_target(y_usgs)
-                    pred_res_t = outputs["residual_mean"]
-                    logvar_res = outputs["residual_logvar"]
-                    logvar_corr = outputs["corrected_logvar"]
+                    (
+                        pred_res_raw,
+                        pred_res_t,
+                        corr_from_res,
+                        pred_corr_t,
+                        has_gaussian_heads,
+                        logvar_res,
+                        logvar_corr,
+                    ) = _unpack_predictions(outputs, y_nwm)
 
-                    loss_res = gaussian_nll(pred_res_t, logvar_res, y_res_t).mean()
                     corr_weights = flow_weighting(y_usgs, flow_emphasis)
+                    if has_gaussian_heads and logvar_res is not None and logvar_corr is not None:
+                        loss_res = gaussian_nll(pred_res_t, logvar_res, y_res_t).mean()
+                        corr_nll = gaussian_nll(pred_corr_t, logvar_corr, y_usgs_t)
+                        loss_corr = (corr_nll * corr_weights).mean()
+                    else:
+                        loss_res = mse(pred_res_t, y_res_t)
+                        corr_mse = (pred_corr_t - y_usgs_t) ** 2
+                        loss_corr = (corr_mse * corr_weights).mean()
 
-                    pred_res_raw = inverse_transform(pred_res_t)
-                    corr_from_res = y_nwm + pred_res_raw
-                    pred_corr_t = transform_target(corr_from_res)
-                    corr_nll = gaussian_nll(pred_corr_t, logvar_corr, y_usgs_t)
-                    loss_corr = (corr_nll * corr_weights).mean()
                     loss = loss_res + loss_corr + consistency_weight * mse(pred_corr_t, y_usgs_t)
                     if curr_weight_pbias > 0:
                         numer = torch.sum(corr_from_res - y_usgs)
@@ -757,7 +828,21 @@ def train_eval(
     print(f"Training complete in {total_training_time/60:.2f} minutes")
 
     bias_shift_info = None
-    if (bias_shift_strategy in {"scaled", "full"} and (bias_shift_alpha > 0 or bias_shift_strategy == "full")) and val_loader is not None:
+    want_bias_shift = (
+        bias_shift_strategy in {"scaled", "full"}
+        and (bias_shift_alpha > 0 or bias_shift_strategy == "full")
+        and val_loader is not None
+    )
+    bias_shift_supported = hasattr(model, "residual_bias")
+    if want_bias_shift and not bias_shift_supported:
+        print("Skipping residual bias shift: current model lacks residual_bias parameter.")
+        bias_shift_info = {
+            "strategy": bias_shift_strategy,
+            "alpha": float(bias_shift_alpha),
+            "status": "unsupported",
+            "applied": 0.0,
+        }
+    elif want_bias_shift and bias_shift_supported:
         bias_diffs: List[np.ndarray] = []
         flow_samples: List[np.ndarray] = []
         with torch.no_grad():
@@ -769,8 +854,7 @@ def train_eval(
                 y_nwm = y_nwm.to(device)
 
                 outputs = model(xb, sb if sb.numel() else None)
-                pred_res_raw = inverse_transform(outputs["residual_mean"])
-                corr_from_res = y_nwm + pred_res_raw
+                corr_from_res = _unpack_predictions(outputs, y_nwm)[2]
                 diff = (corr_from_res - y_usgs).detach().cpu().numpy()
                 flows = y_usgs.detach().cpu().numpy()
                 bias_diffs.append(diff)
@@ -856,8 +940,7 @@ def train_eval(
             y_nwm = y_nwm.to(device)
 
             outputs = model(xb, sb if sb.numel() else None)
-            pred_res_raw = inverse_transform(outputs["residual_mean"])
-            corr_from_res = y_nwm + pred_res_raw
+            pred_res_raw, _, corr_from_res, _, _, _, _ = _unpack_predictions(outputs, y_nwm)
             corrected_raw = corr_from_res
 
             preds_res.append(pred_res_raw.cpu().numpy())
@@ -1056,6 +1139,18 @@ if __name__ == "__main__":
     parser.add_argument("--no-ranger", action="store_true")
     parser.add_argument("--output-prefix", default="hydra_v2")
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument(
+        "--model-arch",
+        choices=["hydra_v2", "hydra_v1"],
+        default="hydra_v2",
+        help="Selects the Hydra architecture (legacy v2 vs. hybrid v1 prototype).",
+    )
+    parser.add_argument(
+        "--patch-size",
+        type=int,
+        default=14,
+        help="Temporal patch size used for hydra_v1 patch embeddings (ignored for hydra_v2).",
+    )
     args = parser.parse_args()
     quantiles = [float(x) for x in args.quantiles.split(",") if x.strip()]
     quantile_weights = [float(x) for x in args.quantile_weights.split(",") if x.strip()]
@@ -1103,4 +1198,6 @@ if __name__ == "__main__":
         use_ranger=not args.no_ranger,
         output_prefix=args.output_prefix,
         seed=args.seed,
+        model_arch=args.model_arch,
+        patch_size=args.patch_size,
     )

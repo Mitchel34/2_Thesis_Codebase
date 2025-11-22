@@ -154,6 +154,7 @@ class HydraTemporalModel(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(d_model // 2, 1),
         )
+        self.residual_bias = nn.Parameter(torch.tensor([-0.15], dtype=torch.float32))
 
         if self.quantiles:
             self.head_quantiles = nn.Sequential(
@@ -202,7 +203,7 @@ class HydraTemporalModel(nn.Module):
         fused = torch.cat(pieces, dim=-1)
         fused = self.fusion(fused)
 
-        residual = self.head_residual(fused).squeeze(-1)
+        residual = self.head_residual(fused).squeeze(-1) + self.residual_bias
         nwm_last = orig_seq[:, -1, self.nwm_index]
         corrected = residual + nwm_last
 

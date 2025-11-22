@@ -1,0 +1,24 @@
+# Watauga multi-objective hyperparameter sweep (2010-2022)
+study_name: watauga_multiobj
+storage: sqlite:///local_only/hpo/watauga_multiobj.db
+output_prefix: watauga_multiobj
+n_trials: 18
+seed: 2025
+data: data/clean/modeling/hourly_training_2010-01-01_2022-12-31.parquet
+epochs: 25
+patience: 4
+train_days: 4018
+val_days: 365
+batch_size: 1024
+quantiles: [0.05, 0.5, 0.95]
+quantile_weights: [0.5, 1.0, 0.5]
+weight_kge: 0.05
+weight_kge_final: null
+enforce_baseline: true
+prior_trials: local_only/archive/baselines/batchsweep_bs1024_lr8e4_shift01_trials.json
+notes: |
+  Objective vector = [RMSE, -NSE, -KGE, |PBIAS|]. The sampler is limited to
+  ranges near the archived best configuration (batch 1024, lr 8e-4, shift 0.1)
+  to stay under a 12-hour wall-clock budget on an M1 MacBook Pro. Use
+  `optuna-dashboard sqlite:///local_only/hpo/watauga_multiobj.db` to inspect the
+  Pareto front, then retrain the preferred trial with the full 45-epoch budget.
