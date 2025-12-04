@@ -31,3 +31,4 @@ __pycache__/
 
 # Misc
 .DS_Store
+data/raw/land_use/
