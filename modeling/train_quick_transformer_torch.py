@@ -3,7 +3,7 @@
 """
 Hydra temporal model training script (PyTorch) for NWM residual correction.
 - Dynamic features: NWM + available ERA5 columns (normalized per train split)
-- Static features: NLCD percentages, regulation flag, etc. (normalized)
+- Static features: optional metadata (regulation flag, basin descriptors)
 - Targets: residual (USGS - NWM) and corrected flow (USGS)
 
 Version 2 adds:
@@ -54,12 +54,7 @@ ERA5_CANDIDATES = [
     "month_cos",
 ]
 
-STATIC_NUMERIC = [
-    "urban_percent",
-    "forest_percent",
-    "agriculture_percent",
-    "impervious_percent",
-]
+STATIC_NUMERIC: List[str] = []
 
 EPS = 1e-6
 
@@ -413,10 +408,7 @@ def train_eval(
 
     static_cols = add_static_columns(df)
     if not static_cols:
-        raise ValueError(
-            "No static columns detected (e.g., NLCD percentages). "
-            "Rebuild the dataset with static land-cover features to proceed."
-        )
+        print("Warning: proceeding without static metadata features.")
 
     dyn_scaled, static_scaled, _ = prepare_features(df, df.index[train_mask], dynamic_cols, static_cols)
 

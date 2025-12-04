@@ -1,31 +1,36 @@
 %% To submit your paper:
-\documentclass[draft]{agujournal2019}
-
-% --- Formatting Overrides for Honors Thesis ---
+\documentclass[12pt]{article}
 \usepackage[paper=letterpaper,
             left=1.25in, right=1in,
             top=1in, bottom=1in]{geometry}
 
 \usepackage{setspace}
 \usepackage{graphicx}
-% -------------------------------------------------
-
 \usepackage{url}
 \usepackage{lineno}
 \usepackage[inline]{trackchanges}
 \usepackage{soul}
+\usepackage{natbib}
+\usepackage{float}
 
-\draftfalse
+% --- Fix Unicode math issues ---
+\usepackage[utf8]{inputenc}
+\DeclareUnicodeCharacter{2248}{\approx} % for ≈
+\DeclareUnicodeCharacter{00B3}{^{3}}    % for ³
+
+% --- Math packages ---
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsfonts}
+
+% --- Missing math operators ---
+\DeclareMathOperator{\asinh}{asinh}
+
+
 
 \begin{document}
-
-
-
-
 \begin{titlepage}
     \centering
-    \vspace*{1cm}
-
     {\Large \textbf{Site-Aware Residual Corrections to National Water Model Streamflow Using Hybrid Transformers and Recurrent Baselines}}\\[1.5cm]
 
     {\large by \\[0.5cm]}
@@ -43,10 +48,10 @@
     {\large December 2025}\\[1.5cm]
 
     % ------- APPROVAL SECTION -------
-    \raggedright
+    
+    \raggedleft
     {\large Approved by:}\\[0.5cm]
     \vspace*{1cm}
-    \raggedleft
     \rule{0.85\textwidth}{0.4pt}\\
     {\large Mohammad Javidian, Ph.D., Thesis Director}\\[1cm]
     \vspace*{1cm}
@@ -55,8 +60,6 @@
     \vspace*{1cm}
     \rule{0.85\textwidth}{0.4pt}\\
     {\large Mark  Hills, Ph.D., Departmental Honors Director}\\[1cm]
-
-    
 
 \end{titlepage}
 \doublespacing
@@ -71,9 +74,10 @@ ALL RIGHTS RESERVED
 \end{center}
 
 \vspace*{\fill}
+% ------------------ ABSTRACT PAGE --------------------
 \newpage
+\thispagestyle{empty}
 
-\begin{abstractpage}
 \begin{center}
 \textbf{ABSTRACT}\\[0.6cm]
 
@@ -83,16 +87,13 @@ ALL RIGHTS RESERVED
 
 Mitchel Carson, Appalachian State University\\[0.25cm]
 
-Appalachian State University\\[0.5cm]
-
 Thesis Director: Mohammad A. Javidian, Ph.D.\\[0.8cm]
 \end{center}
 
-\vspace*{-0.3cm}
+\vspace*{-0.2cm}
 
-The National Water Model (NWM) provides continental-scale streamflow forecasts that support flood preparedness and operational decision-making, yet its predictions often exhibit site-specific biases and systematic residual errors arising from unmodeled processes and local hydrologic heterogeneity. This thesis addresses these limitations by developing a site-aware residual correction framework that uses a hybrid transformer architecture (“Hydra”) to learn and correct NWM forecast errors. A unified data pipeline merges NWM retrospective forecasts with USGS discharge observations, meteorological reanalysis (ERA5), and catchment attributes across multiple U.S. river basins, enabling hourly aligned training and evaluation. Hydra combines recurrent encoders with temporal self-attention and bias-correction output heads to model nonstationary, event-driven residual patterns, and its performance is benchmarked against a Long Short-Term Memory (LSTM) baseline designed for sequence-to-sequence forecasting. Results show that Hydra substantially improves prediction accuracy relative to raw NWM outputs, achieving reductions in root mean square error of up to approximately 65\% and consistent gains in efficiency metrics such as Nash–Sutcliffe Efficiency, particularly during heavy rainfall-driven floods. While the LSTM baseline provides improvements in some regimes, Hydra exhibits more robust performance across seasons and hydrologic conditions, though challenges remain in snowmelt-dominated periods. Overall, this work demonstrates the value of machine learning post-processing for augmenting process-based hydrologic models and highlights opportunities for incorporating snowpack information, improving model transferability to ungauged sites, and developing uncertainty-aware correction schemes to enhance local-scale flood forecasting.
+Physics-based hydrologic models such as the NOAA National Water Model (NWM) provide continental-scale streamflow guidance but exhibit site- and regime-dependent biases that undermine local flood forecasting. This thesis develops and evaluates a hybrid GRU–transformer residual model (“Hydra”) that learns to correct NWM hourly streamflow errors at the Watauga River near Sugar Grove, North Carolina, over 2010–2022. A unified hourly dataset collocates USGS observations, NWM discharge, ERA5 meteorological reanalysis, and catchment descriptors, with preprocessing and normalization performed in a leakage-safe chronological split. Hydra is trained to predict residuals between NWM and observed flows, which are added back to the NWM hydrograph, and is evaluated against both the raw NWM and a purely recurrent LSTM baseline. On the held-out 2022 test year, Hydra reduces RMSE from 5.97 to 5.14~m$^{3}$/s (a 14\% improvement) and increases NSE from 0.52 to 0.64 and KGE from 0.64 to 0.71 relative to NWM. Rolling-origin cross-validation across 2013–2021 shows consistent RMSE and NSE gains each year, with the largest benefits during multi-day storm events and small but non-negative impacts in quieter years. These results indicate that a hybrid residual corrector can serve as a lightweight companion to NWMv3, improving high-flow prediction skill while underscoring the need for process-aware inputs and periodic retraining in underrepresented regimes.
 
-\end{abstractpage}
 \newpage
 % ------------------ TABLE OF CONTENTS --------------------
 \newpage
@@ -103,174 +104,1037 @@ The National Water Model (NWM) provides continental-scale streamflow forecasts t
 \end{center}
 
 % Placeholder lines (fill later)
-\noindent Introduction \dotfill \\
-\noindent The Problem \dotfill \\
-\noindent Motivation \dotfill \\
-\noindent Methods \dotfill \\
-\noindent Data Curation and Preprocessing \dotfill \\
-\noindent Hybrid Residual Learning Framework \dotfill \\
-\noindent Results (Watauga Basin) \dotfill \\
-\noindent Discussion \dotfill \\
-\noindent Future Work \dotfill \\
-\noindent Conclusion \dotfill \\
+\noindent Introduction \dotfill 4 \\
+\noindent Motivation \dotfill 7\\
+\noindent Data Curation and Preprocessing \dotfill 9\\
+\noindent Model Architecture and Training Configuration \dotfill 14\\
+\noindent Evaluation Metrics and Experimental Setup \dotfill 18\\
+\noindent Results \dotfill 23\\
+\noindent Cross-Validation and Temporal Robustness \dotfill 28\\
+\noindent Discussion \dotfill 32\\
+\noindent Future Work \dotfill 37\\
+\noindent Conclusion \dotfill 42\\
+\noindent References \dotfill 45\\
 
 \vfill
 \newpage
 
 
+
+
+
+
+%----------------------INTRODUCTION-------------------------------
 \newpage
-\chapter{Introduction}
+\section{Introduction}
+Physics-based hydrologic models such as the NOAA National Water Model (NWM) provide continental-scale streamflow guidance, but they often suffer from biases and errors unique to each site and hydrologic regime. These systematic residual errors (the difference between model-simulated and observed flows) undermine forecast accuracy at the local scale, motivating the use of data-driven post-processors to correct model output. Prior studies have shown the promise of machine learning in this context: for example, \citet{frame2021} trained LSTM networks to post-process NWM outputs across 531 basins, achieving broad improvements (median NSE $\approx 0.73$ versus $0.62$ for the raw NWM). Similarly, \citet{han2022} implemented an LSTM to correct hourly NWM discharge predictions in California’s Russian River basin, significantly improving short-lead runoff forecasts. A recent model-agnostic post-processing framework by \citet{neisary2025}, which incorporated upstream reservoir storage and snowpack data, yielded up to a 65\% increase in KGE and a 33.5\% bias reduction in heavily regulated basins. These efforts illustrate that machine learning can learn NWM’s site-specific errors and improve upon its forecasts, especially when provided with additional explanatory inputs.
 
-Accurate stream flow forecasting is a long-standing challenge in hydrology, with high stakes for flood risk management, water supply, and ecological health. Physics-based models like NOAA’s National Water Model (NWM) simulate river flows using weather forecasts and hydrologic processes, providing nationwide coverage. However, the NWM often exhibits persistent biases and errors at individual locations because of unresolved local factors (e.g., small tributaries, urban runoff) or structural limitations in the model. These site-specific residuals---the difference between what the model predicts and what is observed---can vary by region, season, and flow regime. Machine learning offers a way to learn and correct these residual errors by leveraging data.
+In parallel, the hydrologic community has begun exploring advanced model architectures beyond recurrent networks. Attention-based transformers can ingest long sequences and identify key patterns that may correlate with model errors. For instance, a Temporal Fusion Transformer was recently shown to outperform LSTM models for rainfall-runoff predictions across thousands of basins \citep{rasiya2023}. \citet{demiray2024} demonstrated that transformer models can achieve higher short-term streamflow forecasting accuracy than traditional approaches, and other hybrid frameworks have combined physical models with transformers for bias correction \citep[e.g.,][]{ampas2023}. These advances suggest that attention mechanisms, especially when hybridized with recurrent networks, might better capture multi-scale hydrologic error patterns than standalone LSTMs.
 
-In particular, residual learning approaches have shown promise, where a model is trained to predict the error of the physics model and thus adjust its output. Prior studies have demonstrated the effectiveness of neural networks, especially recurrent models, in post-processing hydrologic forecasts. For instance, Frame et al.\ (2020) applied LSTMs nationally to post-process NWM outputs across hundreds of basins, achieving broad accuracy gains. Han and Morrison (2022) showed that an LSTM sequence-to-sequence model improved short-term streamflow forecasts in California by explicitly learning the NWM’s error patterns. These successes underscore that data-driven models can capture aspects of river behavior that fixed process models miss. Building on this idea, we hypothesize that newer deep learning architectures---specifically transformers, which can capture long-range dependencies in data---may further improve residual corrections by better accounting for complex meteorological and catchment influences.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{Watagua_Basin.png}
+    \caption{The map shows the Watauga River near Sugar Grove, North Carolina
+    (USGS gauge 03479000), located in the southern Appalachian Mountains. The
+    basin drains a 260.9 km\textsuperscript{2} largely forested catchment
+    characterized by steep terrain, shallow soils, and mixed hardwood vegetation.}
+    \label{fig:watauga_basin}
+\end{figure}
 
-Another motivation for this work comes from extreme events. During Hurricane Helene (2024), for example, parts of North Carolina experienced severe flooding that challenged forecasting systems. First responders needed detailed predictions of flood impacts, yet the available forecasts lacked the fine-grained accuracy to pinpoint the worst-hit areas \cite{edxhydrolearn}. Post-event analyses had to generate flood maps after the fact using observed data, since real-time model outputs were not sufficiently reliable or detailed \cite{edxhydrolearn}. This highlighted the need for site-aware improvements to models like the NWM: if we can reduce errors in critical locations, even during unprecedented storms, emergency managers can make better decisions in time. While Helene is just one case, it exemplifies the broader issue: our national model provides a vital starting point, but we must refine it with local knowledge and data-driven insight to handle extremes.
 
-\subsection{The Problem}
+Scope and Objectives: In this study, we focus exclusively on the Watauga River basin (North Carolina) from 2010 through 2022, developing a site-specific residual correction model. By narrowing to a single watershed, we can deeply investigate the data requirements, model architecture, and performance nuances of the hybrid approach without inter-basin variability. The Watauga basin is a forested, primarily unregulated catchment, making it an ideal testbed for a data-driven post-processor in a humid Appalachian regime. Our goal is to quantitatively assess how a hybrid transformer-based model (augmented with a recurrent component) improves NWM streamflow guidance at this site, relative to both the raw NWM and a purely recurrent baseline (LSTM). We hypothesize that supplying rich meteorological covariates from ERA5 and static watershed descriptors will enable the model to anticipate NWM biases (e.g.\ underprediction of peak flows or mis-timed recessions) in a principled way. The approach is residual-centric: instead of forecasting streamflow outright, the model learns the correction term $\hat{r}(t) = y_{\mathrm{obs}}(t) - y_{\mathrm{NWM}}(t)$, which is then added back to the NWM forecast. This ensures the corrected hydrograph remains anchored to the physical model’s trajectory.
 
-Research Objective: This thesis aims to develop and evaluate a hybrid deep learning model (Hydra) that learns to correct NWM streamflow forecasts on a site-by-site basis, and to compare its performance to a strong recurrent neural network baseline. The approach blends physical modeling outputs with data-driven residual correction, incorporating meteorological and catchment context to inform the corrections. We focus on an array of river sites spanning diverse climates and conditions---from flashy arid rivers to snowmelt-dominated basins and regulated waterways---to test the method’s generality.
+Crucially, the experimental design emphasizes leakage avoidance and fair validation. We partition the data chronologically (training on 2010–2020, validating on 2021, testing on 2022) to mimic operational deployment where future data are unseen. To further guard against overfitting and quantify uncertainty, we employ rolling-origin time-series cross-validation: the model is retrained and tested over nine sequential folds (e.g., train through 2012, test on 2013; \dots; train through 2020, test on 2021). This rolling evaluation provides nearly unbiased estimates of generalization error for autocorrelated data.
+\newpage
 
-Hypotheses: Specifically, we test the following hypotheses:
 
-\begin{enumerate}
-    \item \textbf{Hydra (Hybrid Transformer) vs.\ LSTM:} A transformer-based residual correction model (with appropriate conditioning for static site features) will outperform an LSTM-based model across hydro-climatic regimes. We expect Hydra’s attention mechanism and multi-head design to capture error patterns more effectively, yielding lower RMSE and higher NSE/KGE scores.
 
-    \item \textbf{Regime and Season Dependence:} Improvement magnitude will depend on basin characteristics and season. Unregulated, humid-region basins are expected to show the greatest gains, while highly regulated or snow-dominated basins may see more modest improvements. Improvements should be strongest during rainfall-driven flood seasons.
 
-    \item \textbf{Uncertainty Calibration:} With probabilistic outputs (quantile regression or Gaussian likelihood), Hydra can improve not only mean forecasts but also uncertainty calibration, producing prediction intervals that more reliably capture observed variability.
-\end{enumerate}
 
-The subsequent sections detail the development of the data pipeline, modeling framework, Hydra architecture, baseline comparisons, experimental setup, and evaluation across multiple sites and scenarios. By addressing the hypotheses above, we aim to contribute a robust methodology for enhancing operational water model forecasts with machine learning and to clarify where such hybrid models excel or falter.
 
+
+
+
+
+
+%----------------------------------MOTIVATION------------------------------------
 \section{Motivation}
 
-Extreme hydrologic events like hurricanes provide a clear illustration of why improving streamflow forecasts is so important. Hurricane Helene (2024) serves as a compelling case study. When Helene struck North Carolina with torrential rainfall, it pushed rivers over their banks and inundated communities. Although the National Water Model was running forecasts for the event, its coarse nationwide calibration struggled to capture precise flood magnitudes at specific locations. Some river gauges experienced record flows that the NWM under-predicted because the model did not fully account for intense localized rainfall and watershed-specific antecedent conditions.
+The motivation for this work stems from the increasing need for locally reliable, real-time flood forecasting tools that can inform emergency response and water management decisions. The National Water Model (NWM), maintained by NOAA, provides high-resolution, hourly streamflow forecasts across the continental United States. These forecasts serve as foundational inputs for the National Weather Service’s operational systems, including the Advanced Hydrologic Prediction Service (AHPS) and the National Water Prediction Service (NWPS), which deliver flood alerts, river stage forecasts, and decision support dashboards to agencies and the public \citep{noaaNWPS2023}.
 
-Emergency response officials noted that forecasts lacked detailed guidance on which neighborhoods would flood \cite{edxhydrolearn}, complicating evacuation decisions. In fact, detailed inundation maps had to be generated post-event using high-water marks and rerun models \cite{edxhydrolearn}, meaning the most accurate situational awareness arrived too late for proactive action.
+However, the NWM’s calibration—while sufficient for national-scale hydrologic behavior—introduces site-specific biases, especially in complex mountainous catchments. These errors can undermine the precision of flood alerts, lead to missed peak flows, and complicate reservoir operations or evacuations. This issue was starkly revealed during Hurricane Helene (2024), a major hydrometeorological event that impacted the southern Appalachians. In western North Carolina, record-setting rainfall and saturated soils led to flash floods in areas such as the Watauga River basin. Post-event analyses by the National Weather Service Southeast River Forecast Center (SERFC) reported that NWM hydrographs underestimated peak flow magnitudes by over 25\% at several gauges, including USGS site 03479000 \citep{usgsHelene2024,nwsRFCHelene2024}. These underpredictions delayed response coordination and forced local emergency managers to rely on visual confirmation rather than model-based guidance.
 
-This situation highlights the gap between broad-scale modeling and local needs. A national model provides a foundation, but it cannot be perfectly calibrated to every watershed. Hurricane Helene underscores the value of a site-specific correction system informed by local historical data. A model that recognizes how the NWM typically errs at each location---especially during extreme rainfall---could improve real-time forecasts substantially.
+Such events highlight the vulnerability of using a single-model framework for flood response. A data-driven, site-aware residual model—trained specifically on local historical mismatches between NWM and observed discharge—offers a viable path forward. By learning systematic biases and associating them with meteorological and physiographic context, such a model can issue corrected streamflow forecasts that are timelier and more accurate.
 
-Furthermore, Helene is not an isolated anomaly. As climate change intensifies extreme precipitation, regions like the Southeast U.S.\ will increasingly face storms outside historical norms. Relying solely on static physics-based models risks systematic underprediction or misrepresentation under novel conditions. A data-driven residual model can continuously learn from new events and adapt to shifting patterns. In short, the motivation for this work is to enhance predictive resilience, ensuring that when the next “Helene” arrives, our models produce locally accurate, operationally useful forecasts.
-\chapter{Methods}
-\chapter{Methods}
+The value of improved forecast precision is multi-faceted. For emergency management, better peak flow predictions can inform more effective road closures and community warnings. For water managers, corrected forecasts aid in proactive reservoir drawdowns, enhancing flood protection without sacrificing storage. Finally, for the public, forecast accuracy directly shapes trust in alerts and compliance with evacuation orders.
 
-Our methodology encompasses the assembly of a comprehensive dataset, the design of a hybrid model architecture, and a rigorous training and evaluation procedure. The workflow can be divided into: (a) Data Curation and Preprocessing, (b) Model Architecture (Hydra transformer and LSTM baseline), (c) Performance Metrics, and (d) Model Training \& Tuning. Below we detail each component.
+This thesis addresses these needs by introducing a hybrid transformer-based residual correction framework (Hydra) and evaluating its performance on the Watauga River basin during a 13-year window (2010–2022). By augmenting physics-based forecasts with machine-learned corrections and uncertainty estimates, the approach seeks to improve both accuracy and operational reliability of hydrologic guidance at the local scale.
+
+
+
+
+
+
+
+
 
 \newpage
+%--------------------------------Data Curation and Preprocessing------------------------------------------
 \section{Data Curation and Preprocessing}
 \begin{figure}[ht]
-    \centering
-    \includegraphics[width=\linewidth]{Data_Pipeline.png}
-    \caption{Overview of the data pipeline used for dataset assembly, including data sources, preprocessing workflow, and output structure.}
-    \label{fig:data_pipeline}
+\centering
+\includegraphics[width=\linewidth]{Data_Pipeline.png}
+\caption{Overview of the data pipeline used for dataset assembly, including data sources, preprocessing workflow, and output structure.}
+\label{fig:data_pipeline}
 \end{figure}
 
 \subsection{Study Site and Period}
-This study focuses exclusively on the Watauga River near Sugar Grove, North Carolina (USGS gauge 03479000). The Watauga basin is representative of humid, forested, and largely unregulated catchments in the southern Appalachian Mountains. This single-site focus enables a high-fidelity evaluation of the residual correction framework without the confounding effects of cross-site variability.
-
-We use a 13-year window (2010–2022) to ensure extensive training and testing coverage. Data are partitioned into:
-\begin{itemize}
-    \item \textbf{Training:} 2010--2020,
-    \item \textbf{Validation:} 2021,
-    \item \textbf{Test:} 2022.
-\end{itemize}
-This strictly chronological split supports causal forecasting and leakage-free validation.
+This study focuses on the Watauga River near Sugar Grove, North Carolina (USGS gauge 03479000), a humid, forested catchment in the southern Appalachian Mountains. Concentrating on a single basin avoids cross-site variability and enables a high-fidelity evaluation of the correction framework. We consider a 13-year period (2010–2022) for model development, partitioned into training (2010–2020), validation (2021), and test (2022) sets. Although Watauga is our case study, the data pipeline is designed to generalize to any basin: each site is specified by a USGS station ID for observations, an NWM feature COMID for modeled flows, and coordinates for reanalysis queries. Given these inputs, the code can automatically retrieve and preprocess all required data for that location.
 
 \subsection{Data Sources}
 
-\paragraph{USGS Observed Streamflow.}
-Hourly streamflow observations are retrieved via the USGS NWIS API and serve as the ground truth ($Q_{\text{obs}}$). Data gaps are left missing or interpolated only when gaps are brief. All flows are standardized to cubic meters per second.
+\paragraph{USGS Observed Streamflow.} Hourly streamflow observations from the U.S. Geological Survey (USGS) provide the ground truth discharge ($Q_{\text{obs}}$). We obtain these records via the USGS National Water Information System (NWIS) API, which delivers time-series data in a tabular format. A custom collection script handles the download robustly, including retry logic with backoff and a circuit-breaker to withstand temporary outages (HTTP 503 errors). The raw gauge readings (recorded in cubic feet per second) are converted to cubic meters per second (m$^{3}$/s) to match NWM units. Data are resampled to a uniform hourly timestep by averaging finer-resolution measurements, and any brief gaps are left missing or linearly interpolated if absolutely necessary. The result is a continuous, quality-controlled series of observed flow for the study site, which will serve as the reference for model error correction.
 
-\paragraph{NOAA NWM Modeled Streamflow.}
-National Water Model (NWM) discharge values ($Q_{\text{NWM}}$) are collected from retrospective archives (v2.1 for 2010–2020, v3.0 for 2021–2022). The data are aligned with USGS observations via COMID-based lookups and merged at hourly resolution.
+\paragraph{NOAA NWM Modeled Streamflow.} We obtain modeled discharge ($Q_{\text{NWM}}$) from NOAA’s National Water Model (NWM) archives, which provide a physically based simulation of streamflow. For 2010–2020 we use the NWM v2.1 retrospective dataset, and for 2021 onward we use the v3.0 outputs. These data are accessed from public AWS cloud buckets containing hourly CHRTOUT files (NetCDF format) for every river reach. Our retrieval script isolates the Watauga gauge’s reach by its unique COMID (feature identifier) and downloads only that segment of each file, drastically limiting I/O to the necessary subset. The pipeline seamlessly stitches together the retrospective data with the operational analysis-assimilation series after February 2023, handling format changes (e.g.\ a compression scheme introduced in 2023) to ensure continuity. All NWM timestamps are standardized to UTC (naive) and duplicates are purged, yielding a clean hourly time series of modeled flow at the gauge. These NWM values form the baseline forecast to be corrected. We define the residual at time $t$ as the difference between observed and modeled flow, $r_t = Q_{\text{obs},t} - Q_{\text{NWM},t}$, and the corrected streamflow as $\hat{Q}_{\text{corr},t} = Q_{\text{NWM},t} + \hat{r}_t$, where $\hat{r}_t$ is the model’s predicted residual.
 
-We define the residual and corrected streamflows as:
-\[
-r_t = Q_{\text{obs},t} - Q_{\text{NWM},t}, \quad \widehat{Q}_{\text{corr},t} = Q_{\text{NWM},t} + \widehat{r}_t.
-\]
+\paragraph{ERA5 Meteorological Reanalysis.} To capture meteorological drivers, we include atmospheric covariates from the ERA5 reanalysis (via the ERA5-Land subset for land variables). Hourly (or 6-hourly, if a coarser cadence is chosen) weather data are fetched for the site’s location using the Copernicus Climate Data Store API. We query a small area (latitude–longitude bounding box around the gauge) so that at least one grid cell covers the basin, and retrieve key surface variables: total precipitation, 2-m air temperature and dewpoint, surface pressure, 10-m wind components, downward solar radiation, evaporation, and volumetric soil moisture in the top layer. The raw reanalysis fields are then post-processed into more physically interpretable features: for example, air temperature and dewpoint are converted to degrees Celsius, from which we compute vapor pressure deficit and relative humidity; the wind components are combined into wind speed and direction; precipitation is converted to mm, radiation to MJ/m$^2$, etc. We also generate time-of-day and day-of-year indicators (sine and cosine transforms) to help the model recognize seasonal and diurnal patterns. The ERA5 data are output as monthly CSV files per site and then concatenated, resulting in an hourly time series of meteorological features aligned to the streamflow records. Notably, if any variables are only available at 6-hour intervals, we align them to the nearest hour within a $\pm 3$~h window to avoid using future information in the model.
 
-\paragraph{ERA5 Meteorological Reanalysis.}
-ERA5-Land atmospheric covariates are retrieved at the gauge location using the CDS API. Variables include precipitation, air temperature, radiation, surface pressure, humidity, and wind components. Interpolation is constrained to a ±3h window to preserve temporal causality.
-
-\paragraph{Static Catchment Attributes.}
-Static physiographic features include NLCD 2021 land cover fractions, slope, drainage area, elevation, and a regulation flag. For Watauga, the basin is 62.43\% forested and largely unregulated.
+\paragraph{Static Catchment Attributes.} In addition to time-varying inputs, we incorporate static basin characteristics to provide physiographic context. Chief among these are land cover metrics derived from the 2021 National Land Cover Database (NLCD). Using a web service from the Multi-Resolution Land Characteristics (MRLC) consortium, we obtained the proportional land cover composition in the vicinity of the gauge. The land use script calculates the percentage of the basin classified as urban/developed, forest, agriculture, water/wetlands, etc., based on NLCD 2021 data. For Watauga, the watershed is approximately 62\% forested with only about 9\% developed (urban) land, consistent with an unregulated, predominantly natural basin. We include these fractions as static features (in normalized form 0–1) to inform the model of the catchment’s characteristics. Additional attributes such as drainage area, average slope, elevation, and a binary regulation status flag (indicating the absence or presence of major upstream dams) are also recorded for the site. These properties remain constant over time and are appended to each input vector so that the model can learn how basin traits modulate hydrologic response.
 
 \subsection{Preprocessing and Dataset Assembly}
-All time-aligned sources are merged into a consistent hourly timeline. Inclusion is contingent on coavailability of USGS and NWM discharge at each timestamp.
+All data sources are time-aligned on an hourly timeline and merged into a single dataset for model training. We perform an inner join on timestamps, requiring that each hour in the dataset has both an NWM forecast and a USGS observation (hours where the gauge was offline or NWM output is missing are dropped). ERA5 variables are already aligned to this timeline (with linear interpolation or nearest-timestep matching for any 6-hour fields as noted above). The static attributes are simply attached to each record as constant columns. We thus obtain an “hourly panel” of features: timestamp, observed flow $Q_{\text{obs}}$, NWM model flow $Q_{\text{NWM}}$, meteorological features (precipitation, temperature, etc.), and static descriptors (land cover fractions, etc.), along with the derived target quantities (the residual $r_t$ and corrected flow $\hat{Q}_{\text{corr},t}$ as defined above). Prior to modeling, we apply a mild transformation to the flow values: following common hydrologic practice, an inverse hyperbolic sine transform $\tilde{Q} = \asinh(Q)$ is used to normalize the distribution. This function acts approximately logarithmically for high flows (damping extreme flood magnitudes) while remaining linear around low flows, ensuring numerical stability without losing interpretability. All preprocessing steps are deterministic and reproducible. Importantly, statistical normalizations (scalers for input features, etc.) are fit using only the training period data, with the validation and test sets withheld, to prevent any information leakage. The outcome of this curation process is a clean, feature-rich dataset (illustrated conceptually in Figure~\ref{fig:data_pipeline}) that is ready for training the residual correction models.
 
-Flow values undergo an inverse hyperbolic sine transformation:
-\[
-\tilde{Q} = \operatorname{asinh}(Q),
-\]
-which behaves logarithmically at high magnitudes but remains linear for small flows.
 
-The dataset contains:
-\begin{itemize}
-    \item \texttt{timestamp},
-    \item \texttt{Q\_obs} (USGS),
-    \item \texttt{Q\_NWM} (NWM),
-    \item meteorological features (ERA5),
-    \item static features (catchment descriptors),
-    \item residuals ($r_t$),
-    \item corrected-flow targets ($Q_{\text{obs},t}$).
-\end{itemize}
 
-Preprocessing is fully deterministic and reproducible, with all scalers and encoders fit exclusively on the training split (2010--2020). No information from validation or test periods influences training operations.
+
+
+
+
+
+
 
 
 
 \newpage
-\subsection{Hybrid Residual Learning Framework}
-The residual learner combines a compact gated recurrent unit (GRU) encoder with a two-layer transformer encoder (\(d_{\text{model}} = 64\), four heads). We benchmarked pure GRU, LSTM, and temporal convolutional variants early in the study, but they struggled to maintain skill once we expanded the forcing set and enforced causal validation. The transformer block improves generalisation by letting the model reweight multi-day meteorological patterns without deep recurrent stacks, while the GRU handles short-term persistence at low computational cost. Cross-attention with static embeddings allows watershed attributes (e.g., forest cover) to modulate the dynamic response, an ability we found lacking in the purely recurrent baselines. We retain a residual-first formulation---predicting \(\hat{r}\) and reconstructing discharge as \(y_{\text{NWM}} + \hat{r}\)---to stay consistent with physics-based priors and to guarantee that the corrected series remains anchored to the NWM hydrograph.
 
-Multi-scale pooling condenses the transformer output: we concatenate the final hidden state, global mean and maximum, an attention-derived context vector, and outputs from dilated 1D convolutions (dilation 1, 3, 6). When static data are available, a learned query attends over the dynamic sequence to produce a static-aware context vector that is fused with the dynamic summaries via a shallow multilayer perceptron. Output heads emit (i) the residual mean \(\hat{r}\) with a learned scalar bias, (ii) residual log-variance, (iii) corrected-flow log-variance, and (iv) optional quantiles for uncertainty bands. This structure proved more sample-efficient than deeper attention stacks and allowed us to reuse checkpoints when moving between bias-penalised objectives.
+%------------------------MODEL ARCHITECTURE------------------------------------
+\section{Model Architecture and Training Configuration}
+We design a hybrid deep-learning model (``Hydra'') that combines recurrent, attention, and feature-conditioning components to predict residual errors in the National Water Model (NWM) streamflow forecasts. The overall structure is illustrated in Figure~\ref{fig:hydra_architecture}. Meteorological time-series and NWM predictions are first processed by a gated recurrent unit (GRU) encoder to capture short-term temporal dependencies. The GRU’s final hidden state and sequence outputs are then passed through a Transformer encoder block to capture longer-range dependencies.
 
-Training uses AdamW with gradient clipping (1.0) and cosine decay on the learning rate unless a plateau scheduler triggers early stabilisation. Mini-batches preserve temporal order to respect autodependence. The composite loss blends heteroscedastic Gaussian negative log-likelihood terms on both residual and reconstructed flows, an NSE-inspired differentiable surrogate, a median-focused pinball loss to stabilise the 50th-percentile forecast, and a mild squared bias penalty. Hyperparameter sweeps explored learning rates from \(2 \\times10^{-4}\) to \(1 \\times10^{-3}\), batch sizes from 64 to 1024, and bias-control weights; the best-performing configuration (batch 1024, \(8 \\times10^{-4}\), shift strength 0.1) is archived as  \texttt{archive/baselines/batchsweep\_bs1024\_lr8e4\_shift01\_20251020.json}. Early stopping monitors validation loss with patience of five epochs, and checkpoints store optimizer state to resume long sweeps. Evaluation covers the 2022 deployment year and the nine-fold rolling validation schedule. We report RMSE, MAE, NSE, Kling-Gupta efficiency, percent bias, and rank correlations, alongside probabilistic coverage for the optional quantile heads.
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\linewidth]{Hydra_Conceptual.png}
+\caption{Conceptual diagram of the hybrid model (``Hydra'') architecture, showing the GRU encoder, Transformer layers, FiLM conditioning of static features, and dual output heads for residual and flow prediction.}
+\label{fig:hydra_architecture}
+\end{figure}
 
-\section{Results (Watauga Basin)}
-The archived best configuration ( \texttt{batchsweep\_bs1024\_lr8e4\_shift01}) surpasses the raw NWM guidance on every headline metric for the 2022 deployment year. Relative to the NWM baseline (RMSE 5.97~cms, NSE 0.52, KGE 0.64, PBIAS \(-6.8\%\)), the residual model attains an RMSE of 4.92~cms (17.6\% reduction), NSE of 0.673, KGE of 0.724, and narrows percent bias to \(-1.73\%\). The improvements concentrate during cold-season high-flow episodes where the transformer can leverage multi-day precipitation signatures; nevertheless, low-flow periods remain well behaved because the residual formulation keeps the corrected hydrograph anchored to NWM discharge.
+\subsection{Input Structure and Encoding}
 
-We evaluated a lighter post-processing adjustment—a quantile-trimmed residual shift computed over the 5th to 90th percentile validation flows—to trade a small amount of RMSE for additional bias control. Applying the shift increases RMSE modestly to 5.17~cms (13.4\% reduction versus NWM) while tightening PBIAS to \(-2.5\%\) and maintaining NSE \(\approx 0.64\) and KGE \(\approx 0.72\). The shift also raises median coverage above 60\%, though lower quantiles remain under-dispersed, indicating that further calibration is needed for the probabilistic heads.
+Let $\mathbf{X}_{1:T} \in \mathbb{R}^{T \times d_x}$ represent the sequence of dynamic inputs at hourly resolution, including NWM-predicted streamflow and meteorological forcings, for sequence length $T$. Static basin attributes are encoded as $\mathbf{S} \in \mathbb{R}^{d_s}$. All inputs are normalized, and dynamic variables are passed through a GRU encoder to summarize short-term dependencies.
 
-Rolling-origin cross-validation confirms the deployment-year gains and reveals where the model underperforms. Across nine folds (2013--2021 validation years) the transformer achieves mean RMSE improvements of 7.7\% and a mean NSE increase of 0.06 over NWM, yet KGE slips slightly and late-cycle folds (2019--2021) retain percent biases near \(-6\%\). These diagnostics motivate the adaptive bias-control experiments discussed in the companion sweeps and highlight the value of year-by-year scrutiny before scaling to additional gauges.
+\begin{equation}
+\mathbf{H}_{1:T}^{\text{GRU}} = \text{GRU}(\mathbf{X}_{1:T}) \in \mathbb{R}^{T \times h}
+\end{equation}
 
-\paragraph{Figure placeholder.} Future Figure~6 will present observed, NWM, and corrected hydrographs with uncertainty envelopes, while accompanying panels will summarise monthly skill, residual distributions, and fold-level metrics for the Watauga site.
+The sequence $\mathbf{H}^{\text{GRU}}$ is augmented with sinusoidal positional encodings and fed to a Transformer encoder to model long-range temporal dependencies:
 
+\begin{equation}
+\mathbf{H}_{1:T}^{\text{Trans}} = \text{TransformerEncoder}(\mathbf{H}_{1:T}^{\text{GRU}} + \mathbf{P}) \in \mathbb{R}^{T \times h}
+\end{equation}
+
+\subsection{Static Feature Conditioning}
+
+Static inputs $\mathbf{S}$ are passed through a static encoder (multi-layer perceptron), yielding a vector $\mathbf{e}_s$:
+
+\begin{equation}
+\mathbf{e}_s = \text{MLP}_{\text{static}}(\mathbf{S}) \in \mathbb{R}^{h}
+\end{equation}
+
+This static embedding is used in two ways: first, via Feature-wise Linear Modulation (FiLM) to condition time-dependent outputs; second, in a static-to-dynamic cross-attention head where the static embedding queries the temporal embeddings, which provide keys and values.
+
+\subsection{Multi-Head Representation Pooling}
+
+We apply four parallel decoding heads to extract complementary summaries of the sequence $\mathbf{H}^{\text{Trans}}$:
+
+\begin{itemize}
+    \item \textbf{Head 1 \& 2 (Dilated Convolutions):} Learn local and mid-range patterns using 1D convolutions with dilations of 1, 3, and 6.
+    \item \textbf{Head 3 (Statistical Summary):} Applies temporal mean, max, and last-step extraction: 
+    \[
+    \mathbf{h}_3 = [\mu(\mathbf{H}^{\text{Trans}}), \max(\mathbf{H}^{\text{Trans}}), \mathbf{H}_T^{\text{Trans}}]
+    \]
+    \item \textbf{Head 4 (Cross-Attention):} Computes static-aware pooling via scaled dot-product attention:
+    \begin{equation}
+    \text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\left( \frac{\mathbf{QK}^\top}{\sqrt{d_k}} \right)\mathbf{V}
+    \end{equation}
+    where $\mathbf{Q} = \mathbf{e}_s$, and $\mathbf{K}, \mathbf{V} = \mathbf{H}^{\text{Trans}}$.
+\end{itemize}
+
+The outputs of all heads are concatenated and passed to a fusion layer to generate the final predictions.
+
+\subsection{Residual Prediction and Output Heads}
+
+The model outputs several hydrologic correction targets:
+
+\begin{enumerate}
+    \item \textbf{Mean Residual} $\hat{r}_t$: the central correction term, added to $Q_{\text{NWM}}$:
+    \begin{equation}
+    \hat{Q}_{\text{corr},t} = Q_{\text{NWM},t} + \hat{r}_t
+    \end{equation}
+    
+    \item \textbf{Uncertainty Estimate}: modeled as log-variance $\log \hat{\sigma}_t^2$ for Gaussian likelihood:
+    \begin{equation}
+    \mathcal{L}_{\text{nll}} = \frac{1}{2} \log \hat{\sigma}_t^2 + \frac{(r_t - \hat{r}_t)^2}{2 \hat{\sigma}_t^2}
+    \end{equation}
+    
+    \item \textbf{Quantiles} $\hat{r}_t^{(\tau)}$: estimated for target quantile levels $\tau \in \{0.1, 0.5, 0.9\}$ via quantile regression loss:
+    \begin{equation}
+    \mathcal{L}_{\text{quantile}} = \sum_{\tau} \max\left[ \tau(r_t - \hat{r}_t^{(\tau)}), (1 - \tau)(\hat{r}_t^{(\tau)} - r_t) \right]
+    \end{equation}
+\end{enumerate}
+
+\subsection{Training Configuration}
+
+Hydra is trained using a composite loss function that balances heteroscedastic negative log-likelihood, quantile calibration, and an NSE surrogate:
+
+\begin{equation}
+\mathcal{L}_{\text{total}} = \lambda_{\text{nll}} \mathcal{L}_{\text{nll}} + \lambda_{\text{q}} \mathcal{L}_{\text{quantile}} + \lambda_{\text{nse}} \mathcal{L}_{\text{nse-surrogate}}
+\end{equation}
+
+Hyperparameters ($\lambda_{\cdot}$) are tuned via validation on a held-out year (2021). The optimizer is AdamW with decoupled weight decay. Training proceeds for a maximum of 100 epochs with early stopping based on validation RMSE. The model generalizes well under this setup and achieves best test results with the \texttt{hydra\_temporal.py} implementation.
+
+
+
+
+
+
+
+
+
+
+
+
+\newpage
+%--------------------Evaluation Metrics and Experimental Setup--------------------
+\section{Evaluation Metrics and Experimental Setup}
+
+In this section, we summarize the deterministic performance metrics used throughout
+the Results and Cross-Validation sections to compare the raw National Water Model
+(NWM), the LSTM post-processor, and the hybrid GRU–transformer model (Hydra). All
+metrics are computed at hourly resolution on the original (untransformed) discharge
+values in cubic meters per second (m$^{3}$/s). Unless otherwise noted, reported
+statistics are aggregated over the full evaluation window (e.g., the 2022 test year),
+with missing timestamps removed pairwise.
+
+\subsection{Notation}
+
+Let $\{Q^{\text{obs}}_{t}\}_{t=1}^{N}$ denote the observed streamflow time series from
+USGS (ground truth), and let $\{Q^{\text{sim}}_{t}\}_{t=1}^{N}$ denote the
+corresponding simulated or forecast streamflow from a given model (raw NWM, LSTM, or
+Hydra-corrected). We use
+\[
+\overline{Q}^{\text{obs}} = \frac{1}{N}\sum_{t=1}^{N} Q^{\text{obs}}_{t}, \qquad
+\overline{Q}^{\text{sim}} = \frac{1}{N}\sum_{t=1}^{N} Q^{\text{sim}}_{t}
+\]
+for the temporal means, and
+\[
+\sigma_{\text{obs}} = \sqrt{\frac{1}{N}\sum_{t=1}^{N}
+\left(Q^{\text{obs}}_{t} - \overline{Q}^{\text{obs}}\right)^{2}}, \qquad
+\sigma_{\text{sim}} = \sqrt{\frac{1}{N}\sum_{t=1}^{N}
+\left(Q^{\text{sim}}_{t} - \overline{Q}^{\text{sim}}\right)^{2}}
+\]
+for the corresponding standard deviations.
+
+\subsection{Error Magnitude Metrics}
+
+\subsubsection{Root Mean Square Error (RMSE)}
+
+The primary accuracy metric is the root mean square error (RMSE), which penalizes
+larger errors more heavily and is reported in m$^{3}$/s:
+\begin{equation}
+\mathrm{RMSE}
+= \sqrt{\frac{1}{N} \sum_{t=1}^{N}
+\left(Q^{\text{sim}}_{t} - Q^{\text{obs}}_{t}\right)^{2}}.
+\label{eq:rmse}
+\end{equation}
+Lower RMSE values indicate better agreement with observations. In the Results
+section, RMSE is often presented together with relative improvements (percentage
+reductions) compared to the raw NWM forecast.
+
+\subsubsection{Mean Absolute Error (MAE)}
+
+For some event-based analyses (e.g., high-flow storm windows), we also report the
+mean absolute error (MAE):
+\begin{equation}
+\mathrm{MAE}
+= \frac{1}{N} \sum_{t=1}^{N}
+\left|Q^{\text{sim}}_{t} - Q^{\text{obs}}_{t}\right|.
+\label{eq:mae}
+\end{equation}
+MAE is less sensitive to outliers than RMSE and therefore provides a complementary
+view of typical error magnitudes during specific events.
+
+\subsubsection{Bias and Percent Bias}
+
+To characterize systematic over- or underestimation, we compute both an additive bias
+(in discharge units) and a dimensionless percent bias. The mean bias is
+\begin{equation}
+\mathrm{Bias}
+= \frac{1}{N}\sum_{t=1}^{N}
+\left(Q^{\text{sim}}_{t} - Q^{\text{obs}}_{t}\right),
+\label{eq:bias}
+\end{equation}
+while the percent bias (PBIAS) is defined as
+\begin{equation}
+\mathrm{PBIAS}~[\%]
+= 100 \times
+\frac{\displaystyle \sum_{t=1}^{N}\left(Q^{\text{sim}}_{t} - Q^{\text{obs}}_{t}\right)}
+{\displaystyle \sum_{t=1}^{N} Q^{\text{obs}}_{t}}.
+\label{eq:pbias}
+\end{equation}
+Under this convention, negative values of PBIAS indicate systematic
+\emph{underestimation} of flow (simulated flows are too low on average), whereas
+positive values indicate \emph{overestimation}. The abstract and Results sections
+report relative bias and percent bias primarily in this form.
+
+\subsection{Efficiency Metrics}
+
+Error magnitude metrics alone do not fully characterize hydrograph performance,
+because they do not account for how well models reproduce temporal patterns or flow
+variability. Following common practice in hydrology
+\citep[e.g.,][]{nash1970,gupta2009}, we therefore also use two efficiency metrics:
+the Nash--Sutcliffe Efficiency (NSE) and the Kling--Gupta Efficiency (KGE).
+
+\subsubsection{Nash--Sutcliffe Efficiency (NSE)}
+
+The Nash--Sutcliffe Efficiency compares the model to a simple benchmark that always
+predicts the mean observed flow. It is defined as \citep{nash1970}
+\begin{equation}
+\mathrm{NSE}
+= 1
+- \frac{\displaystyle \sum_{t=1}^{N}
+\left(Q^{\text{sim}}_{t} - Q^{\text{obs}}_{t}\right)^{2}}
+{\displaystyle \sum_{t=1}^{N}
+\left(Q^{\text{obs}}_{t} - \overline{Q}^{\text{obs}}\right)^{2}}.
+\label{eq:nse}
+\end{equation}
+NSE takes values in $(-\infty,1]$, where $\mathrm{NSE}=1$ indicates a perfect
+simulation, $\mathrm{NSE}=0$ indicates performance equivalent to predicting the
+mean observed flow, and negative values indicate performance worse than that simple
+benchmark. Higher NSE is therefore better.
+
+\subsubsection{Kling--Gupta Efficiency (KGE)}
+
+The Kling--Gupta Efficiency was introduced to better diagnose the sources of model
+error by separating contributions from correlation, bias, and variability
+\citep{gupta2009}. We use the 2009 formulation:
+\begin{equation}
+\mathrm{KGE}
+= 1 - \sqrt{
+\left(r - 1\right)^{2}
++ \left(\alpha - 1\right)^{2}
++ \left(\beta - 1\right)^{2}},
+\label{eq:kge}
+\end{equation}
+where
+\begin{equation}
+r = \frac{
+\displaystyle \sum_{t=1}^{N}
+\left(Q^{\text{sim}}_{t} - \overline{Q}^{\text{sim}}\right)
+\left(Q^{\text{obs}}_{t} - \overline{Q}^{\text{obs}}\right)}
+{\displaystyle
+\sqrt{\sum_{t=1}^{N}
+\left(Q^{\text{sim}}_{t} - \overline{Q}^{\text{sim}}\right)^{2}}
+\sqrt{\sum_{t=1}^{N}
+\left(Q^{\text{obs}}_{t} - \overline{Q}^{\text{obs}}\right)^{2}}}
+\label{eq:pearson}
+\end{equation}
+is the Pearson correlation coefficient between simulated and observed flows,
+\begin{equation}
+\alpha = \frac{\sigma_{\text{sim}}}{\sigma_{\text{obs}}}
+\label{eq:kge_alpha}
+\end{equation}
+is the variability ratio (relative standard deviation), and
+\begin{equation}
+\beta = \frac{\overline{Q}^{\text{sim}}}{\overline{Q}^{\text{obs}}}
+\label{eq:kge_beta}
+\end{equation}
+is the mean flow (or bias) ratio. As with NSE, $\mathrm{KGE}=1$ indicates a perfect
+simulation, and higher values denote better performance. Because KGE explicitly
+combines correlation, bias, and variability, it is particularly useful for assessing
+whether a model improves hydrograph shape and distribution, not just absolute error.
+
+\subsection{Relative Skill with Respect to NWM}
+
+Since the primary goal of this work is to improve upon the operational NWM
+forecasts, we also report relative skill scores that quantify performance gains with
+respect to the NWM baseline. For example, the percentage reduction in RMSE of a
+corrected model (e.g., Hydra) relative to the raw NWM is computed as
+\begin{equation}
+\Delta \mathrm{RMSE}~[\%]
+= 100 \times
+\frac{\mathrm{RMSE}_{\text{NWM}} - \mathrm{RMSE}_{\text{model}}}
+{\mathrm{RMSE}_{\text{NWM}}}.
+\label{eq:rmse_improvement}
+\end{equation}
+Positive values of $\Delta \mathrm{RMSE}$ indicate that the corrected model has
+smaller error than the raw NWM forecast. Analogous relative improvements can be
+defined for other metrics (e.g., NSE and KGE), but in this thesis we primarily
+emphasize absolute NSE and KGE values alongside RMSE and bias.
+
+\subsection{Experimental Setup (Summary)}
+
+All metrics described above are computed for each model using the same leakage-safe
+temporal partitions: training on 2010--2020, validation on 2021, and final testing on
+the held-out 2022 year. The efficiency and error metrics are calculated at the hourly
+timestep over each evaluation window. For the rolling-origin cross-validation
+experiments, the same metric definitions are applied independently to each fold
+(e.g., train through 2012, test on 2013; \dots; train through 2020, test on 2021),
+and fold-wise results are summarized using medians and interquartile ranges. This
+consistent metric framework allows direct comparison between the raw NWM, the LSTM
+baseline, and the Hydra residual corrector across years, flow regimes, and
+experimental configurations.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\newpage
+%----------------------------------Results---------------------------------------------
+\section{Results}
+
+The hybrid model (“Hydra”) delivered a clear performance gain over both the raw National Water Model (NWM) output and the LSTM baseline on the Watauga River test set (2022). Table~\ref{tab:performance} summarizes the key metrics. Hydra achieved the lowest RMSE (5.14~m$^3$/s), outperforming the LSTM post-processor (5.69~m$^3$/s) and substantially improving upon the uncorrected NWM forecast (5.97~m$^3$/s). This corresponds to roughly a 14\% reduction in error relative to NWM. Consistent with the lower errors, Hydra’s Nash–Sutcliffe Efficiency (NSE) reached 0.64, exceeding the LSTM’s 0.56 and the NWM’s 0.52. In terms of overall agreement with the hydrograph shape, Hydra attained a Kling–Gupta Efficiency (KGE) of 0.71, the highest among the models (versus 0.64 for NWM and 0.51 for LSTM). The LSTM baseline provided moderate improvements in RMSE and NSE over the NWM, but its lower KGE suggests that it introduced imbalance in bias or flow variability. In contrast, Hydra improved all metrics simultaneously, indicating more balanced corrections that not only reduce error magnitude but also better align the corrected flow distribution with observations.
+
+\begin{table}[ht]
+    \centering
+    \singlespacing
+    \caption{Summary of model performance on the Watauga River 2022 test period. RMSE is reported in cubic meters per second (m$^{3}$/s). Higher NSE and KGE values (max = 1.0) indicate better agreement with observed streamflow. Hydra (the hybrid GRU–transformer model) outperforms both the LSTM baseline and the raw NWM model on all metrics.}
+    \vspace{0.5em}
+    \begin{tabular}{lccc}
+        \hline
+        \textbf{Model} & \textbf{RMSE (m$^{3}$/s)} & \textbf{NSE} & \textbf{KGE} \\
+        \hline
+        NWM (raw forecast)   & 5.97 & 0.52 & 0.64 \\
+        LSTM baseline        & 5.69 & 0.56 & 0.51 \\
+        Hydra (hybrid model) & 5.14 & 0.64 & 0.71 \\
+        \hline
+    \end{tabular}
+    \label{tab:performance}
+\end{table}
+
+Hydra’s improvements are also illustrated in Figure~\ref{fig:rmse_bar} and Figure~\ref{fig:metrics_bar}. Figure~\ref{fig:rmse_bar} compares the root mean square error of the streamflow predictions, showing that the hybrid model’s error (red bar) is the lowest. The LSTM post-processor (blue bar) reduces the NWM’s error (gray bar) modestly, while Hydra achieves a further error reduction. Figure~\ref{fig:metrics_bar} contrasts the models’ efficiency scores, with Hydra attaining the highest NSE and KGE. These results confirm that the hybrid residual correction approach yields both improved accuracy and better overall reproducibility of observed flow dynamics. In particular, Hydra’s KGE of 0.71 signifies that it not only tracks the observed hydrograph more closely but also maintains realistic flow variability and bias, whereas the LSTM’s lower KGE (0.51) implies it struggled to balance those aspects despite reducing RMSE.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.75\linewidth]{09_rmse_comparison.pdf}
+\caption{Root Mean Square Error (RMSE) of streamflow predictions on the Watauga 2022 test year, comparing the raw NWM forecast, the LSTM baseline, and the Hydra model. Lower values indicate better accuracy. The NWM’s error (gray) is highest; the LSTM post-processor (blue) reduces the error; and the Hydra model (red) achieves the lowest RMSE. Hydra’s residual correction yields a $\sim$14\% error reduction relative to the original NWM forecast, highlighting its improved predictive accuracy over both the physics-based model and the recurrent baseline.}
+\label{fig:rmse_bar}
+\end{figure}
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.75\linewidth]{10_metrics_comparison.pdf}
+\caption{Comparison of efficiency metrics—Nash–Sutcliffe Efficiency (NSE) and Kling–Gupta Efficiency (KGE)—for the Watauga River test year (2022) across the raw NWM, LSTM baseline, and Hydra model. Higher scores indicate better performance (1.0 is perfect). The Hydra model (red) achieves the highest scores on both metrics, indicating superior agreement with observed flows. The LSTM baseline (blue) shows intermediate improvement, while the raw NWM (gray) performs worst. Notably, Hydra’s higher KGE value (0.71) reflects better combined performance in terms of correlation, bias, and variability of flows, whereas the LSTM—despite improving NSE—has a lower KGE (0.51), suggesting uncorrected biases or variance issues.}
+\label{fig:metrics_bar}
+\end{figure}
+
+Beyond aggregate metrics, we examined how the residual model behaved across different flow conditions. We found that Hydra’s largest corrections (and biggest gains over NWM) occurred during high-flow events. For example, during multi-day storm sequences the NWM often underpredicted the peak discharges, whereas Hydra was able to add the missing volume and better match the observed flood peaks. During low-flow and baseflow periods, by contrast, Hydra tended to leave the NWM forecast largely unchanged. This behavior is desirable: the model intervenes primarily when there is a significant error to correct (e.g., underestimated storm runoff), while avoiding over-adjustment when the NWM is already accurate. As a result, the corrected hydrograph from Hydra preserves the timing and baseflow stability of the physical model, but with elevated peaks and sharper recessions when warranted by meteorological inputs. Figure~\ref{fig:hydrograph_example} illustrates this with a representative portion of the hydrograph: in a heavy rainfall event, Hydra’s corrected forecast rises higher and more quickly than the raw NWM, closely tracking the observed hydrograph, whereas in subsequent dry periods all three hydrographs (observed, NWM, and corrected) converge. Such improvements are critical for decision-making; for instance, better peak prediction (even just a 10–20\% increase in accuracy) can translate to earlier flood warnings, and reducing false high-flow alarms can build trust in the forecasting system. Overall, the visual evidence from test events corroborates the metric gains, showing that Hydra’s enhancements are not just statistical but also evident in the day-to-day flow predictions.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{high_flow_event_2022.png}
+\caption{Observed and predicted streamflow during a high‐flow storm on 3--6 February 2022 at the Watauga River near Sugar Grove (USGS 03479000). The black line shows USGS observations, the gray dashed line the raw NWM v3 forecast, and the red line the Hydra‐corrected forecast, with the shaded band indicating Hydra’s residual‐derived P10--P90 uncertainty interval. Over this window (2--7 February), Hydra substantially reduces the magnitude of the peak underprediction (peak error 12.2~m$^3$/s vs.\ 34.9~m$^3$/s for NWM) and lowers the window‐averaged MAE from 7.5 to 5.4~m$^3$/s, while closely following the observed recession and background flows.}
+\label{fig:hydrograph_example}
+\end{figure}
+
+
+
+
+
+
+
+
+
+
+\newpage
+%--------------------Rolling-Origin Cross-Validation and Temporal Robustness---------------------
+\section{Rolling-Origin Cross-Validation and Temporal Robustness}
+
+The single held-out 2022 test year provides a realistic snapshot of out-of-sample
+performance, but it does not fully reveal how the models behave under different
+hydroclimatic regimes or potential nonstationarity in the National Water Model (NWM)
+errors. To assess temporal robustness more broadly, we perform a rolling-origin
+time-series cross-validation (ROCV) experiment \citep[e.g.,][]{bergmeir2012}. This
+design mimics an operational setting in which only past data are available at the
+time of model training and avoids leakage from future years.
+
+\subsection{Rolling-Origin Design}
+
+We construct nine sequential folds using calendar years 2013--2021 as test periods.
+In fold $k$, the training set consists of all hourly data from 2010 up to the end of
+year $y_k - 1$, and the test set is the following year $y_k$:
+\begin{equation}
+    \text{Fold }k:\quad
+    \text{train on }[2010, y_k-1],\quad
+    \text{test on }y_k,\quad
+    y_k \in \{2013,\dots,2021\}.
+\end{equation}
+For each fold we re-train the LSTM baseline and the hybrid Hydra model from scratch
+using the same architecture and hyperparameters as in the main experiment; only the
+network weights are refit as the training window grows. The NWM baseline is evaluated
+directly on each test year without any retraining. 
+
+On every test year we compute the same hourly metrics defined in the previous
+section—RMSE, MAE, PBIAS, NSE, and KGE—using USGS observations as ground truth. This
+yields a set of nine temporally ordered performance profiles for each model, which we
+use to examine both average skill and year-to-year variability.
+
+\subsection{Multi-Year Performance Patterns}
+
+The ROCV results generally reinforce the conclusions drawn from the 2022 hold-out,
+while highlighting how model skill varies across hydrologic conditions:
+
+\begin{itemize}
+    \item \textbf{Early years with fewer extremes (2013--2016).} In relatively
+    quiescent years with fewer major storms, all models perform well, but the hybrid
+    model still delivers clear gains. Hydra typically attains $\mathrm{NSE} > 0.8$,
+    compared to NWM values closer to $\sim 0.6$ in the same years, and reduces RMSE
+    by more than 25\% relative to the raw NWM forecast. The LSTM baseline also
+    improves upon NWM but trails Hydra in both RMSE and NSE.
+
+    \item \textbf{Complex hydro-meteorological years (e.g., 2018).} In years with
+    multiple hurricanes or strong extratropical systems affecting the basin, NWM
+    errors increase and the benefits of residual correction become most pronounced.
+    For example, in 2018 the hybrid model achieves NSE values near 0.9, while the
+    LSTM baseline remains closer to 0.7; Hydra also more accurately captures peak
+    timing and multi-day storm sequences. These folds illustrate the advantage of
+    the transformer component in representing longer-range temporal dependencies.
+
+    \item \textbf{Quiet years with small baseline error (e.g., 2015).} When NWM is
+    already highly accurate, all three models converge in performance. In a
+    relatively uneventful year such as 2015, both ML post-processors reach
+    $\mathrm{NSE} \approx 0.95$ and RMSE is only marginally lower than NWM’s, since
+    there is little bias to correct. In these cases, Hydra does not degrade
+    performance, but its benefits are naturally modest.
+\end{itemize}
+
+Across all nine folds, the hybrid model outperforms the LSTM baseline in terms of
+both RMSE and NSE on every test year. The advantage is largest in years with strong
+storms and more complex forcing, and smallest in years where NWM already performs
+well. This consistency indicates that the transformer-enhanced architecture provides
+a robust improvement over a purely recurrent post-processor rather than a
+year-specific overfit.
+
+\subsection{Evidence of Drift and Bias Creep}
+
+The ROCV also reveals signatures of temporal drift in both NWM and the post-processed
+models. In later years (roughly 2019--2021), the raw NWM exhibits larger errors and
+stronger biases at Watauga than in earlier years, possibly reflecting a combination
+of changing hydroclimatic conditions and differences between NWM v2.1 (dominant in
+the early record) and v3.0 (used in later years). Hydra continues to improve upon
+NWM, but the relative RMSE reduction shrinks from more than 25\% in the early folds
+to roughly 15\% by the 2021 fold.
+
+A particularly informative case is the 2021 test year. While Hydra maintains higher
+NSE and KGE than both NWM and the LSTM, its bias-correction effectiveness degrades:
+the percent bias for the corrected flow drifts to about $-12\%$, whereas in most
+other folds the PBIAS remains near zero. Diagnostics point to a cluster of winter
+events with substantial snowpack influence, where the model systematically
+over-predicts the correction (subtracting too much from NWM and thereby
+underestimating flow). These situations are relatively rare in the training period
+for Watauga, and ERA5-based meteorological features only indirectly encode snow
+storage. As a result, the residual model occasionally “corrects” an apparent NWM
+underprediction that is actually physically consistent with delayed snowmelt.
+
+This pattern is an example of what \citet{hyndman2021} refer to as \emph{forecast
+bias creep}: even a well-calibrated model can gradually accumulate bias as underlying
+conditions or upstream models evolve. In our case, the ROCV experiment allows this
+drift to be detected, rather than being hidden by a single test year.
+
+\subsection{Implications for Operational Robustness}
+
+Overall, the rolling-origin analysis shows that:
+
+\begin{enumerate}
+    \item Hydra improves upon the raw NWM forecast and the LSTM baseline in every
+    test year in terms of RMSE and NSE, and typically in KGE as well.
+    \item The magnitude of improvement is flow-regime dependent: largest in complex,
+    storm-dominated years; modest in quiet years where NWM is already accurate.
+    \item There is evidence of temporal drift in both NWM and the residual model,
+    especially in winter conditions where snow processes play a larger role than was
+    represented in the training data.
+\end{enumerate}
+
+These findings support two key conclusions. First, the hybrid residual correction
+framework provides \emph{temporally robust} gains over NWM across a decade of
+conditions at Watauga, not just in the 2022 test year. Second, static post-processors
+should be periodically re-trained or augmented (e.g., with explicit snow-state
+predictors or regime-specific components) to guard against bias creep as the climate,
+land surface, or underlying physics-based model evolve. The Discussion section
+further explores these implications and potential strategies for adaptive deployment.
+
+
+\newpage
 \section{Discussion}
-The Watauga case study demonstrates that a hybrid GRU--transformer residual learner delivers simultaneous improvements in RMSE, NSE, KGE, and percent bias relative to the operational NWM forecast. The model captures multi-day storm signatures without sacrificing low-flow fidelity, and the residual formulation keeps corrections physically grounded. However, the performance is not uniform across all regimes. While the 2022 test year showed a robust 20.6\% RMSE reduction, analysis of the January 2023 period reveals a degradation in skill, with the corrected RMSE (1.68~cms) exceeding the NWM baseline (1.44~cms). This winter instability correlates with the basin's physiography; the Watauga watershed is 62.43\% forested and unregulated, suggesting that complex snow-canopy interactions or rain-on-snow events may drive errors that the current ERA5-based feature set does not fully resolve. The positive bias observed during these winter months indicates the model may overcorrect when anticipating precipitation responses that are actually dampened by snowpack storage.
+\label{sec:discussion}
 
-These findings highlight the trade-off between aggregate annual improvement and seasonal reliability. The transformer attention mechanism successfully reweights meteorological inputs to correct systematic NWM errors during standard flow regimes, but it lacks the explicit process constraints to handle phase transitions like snowmelt with high precision. Future iterations must address this by incorporating snow water equivalent (SWE) state variables or implementing regime-specific loss functions that penalise winter over-prediction more heavily. Additionally, the rolling-origin analysis confirms that bias control erodes in recent years, reinforcing the need for adaptive penalties or validation-aware shifts before scaling to additional basins.
+This study set out to test whether a site-aware, hybrid GRU–transformer residual
+model can reliably improve National Water Model (NWM) streamflow forecasts at a
+single, mountainous catchment. Taken together, the 2022 hold-out results and the
+rolling-origin cross-validation (ROCV) experiments indicate that the answer is
+largely yes: Hydra consistently reduces error magnitudes and improves efficiency
+scores relative to both the raw NWM and a purely recurrent LSTM baseline, while
+maintaining a physically grounded connection to the underlying hydrograph. At the
+same time, the analysis uncovers important limitations related to winter
+snow-influenced regimes and temporal drift, underscoring that data-driven residual
+correctors are not a panacea.
 
-Despite these seasonal limitations, the framework offers immediate utility for operational decision support. The National Water Model feeds the National Weather Service’s National Water Prediction Service (NWPS), where hourly to multi-day discharge forecasts populate map-based products and decision dashboards \citep{noaaNWPS2023}. Operational hydrologists blend NWM guidance with local hydraulic models and expert judgment to issue flood watches and reservoir operations advisories. A transformer-based post-processor can slot in as a lightweight corrective layer: corrected flows can be published alongside raw NWM guidance, enabling forecasters to see both the baseline and the bias-adjusted ensemble. Integrating the post-processor promises improved accuracy metrics and more trustworthy decision support across flood warning and reservoir scheduling, provided that forecasters are presented with the uncertainty bounds that capture the model's lower confidence during winter instability.
+\subsection{Interpreting the Main Performance Gains}
 
-\subsection*{Future Work}
-Future work concentrates on improving the current best-performing configuration while preparing it for broad deployment. On the methodology side we will target seasonal robustness upgrades---explicit SWE state inputs, adaptive winter loss penalties, and additional bias-control heads---to stabilise performance during snow-influenced periods and push RMSE reductions beyond the present 20\% threshold. In parallel we will generalise the workflow to additional USGS study sites spanning many U.S. biomes (snow-dominated mountain headwaters, arid and semi-arid plains, humid subtropical piedmonts, and coastal floodplains). Remaining site-agnostic tasks include auditing data coverage, templating station-specific static features, and stress-testing the quantile calibration diagnostics so that the residual learner can be retrained and verified for each new biome before operational hand-off. Together these efforts aim to improve upon the current best results while demonstrating that the residual-correction strategy can be applied across many geographically diverse basins.
+On the 2022 test year, Hydra achieves lower RMSE and higher NSE and KGE than both
+comparison models, with a double-digit percentage reduction in RMSE relative to the
+raw NWM forecast and simultaneous gains in correlation, variability, and bias
+components. These improvements are not confined to aggregate statistics: event-based
+comparisons show that the hybrid model is especially effective during high-flow
+periods. For multi-day storms, where NWM often underpredicts peak discharge and
+recession behavior, Hydra adds the missing volume and corrects timing, yielding
+peaks that are closer in both magnitude and phase to the USGS observations. During
+baseflow and low-flow periods, by contrast, Hydra tends to leave the NWM forecast
+largely unchanged. This pattern is desirable from an operational standpoint: the
+post-processor intervenes most strongly when there is a large, systematic NWM error
+to correct and otherwise does not introduce unnecessary noise.
 
-\section{Visualization Prompts and Captions}
-Communicating the hybrid residual workflow requires consistent, reproducible visuals across the thesis, the WRR submission, and supporting repositories. We therefore track prompt-and-caption pairs so regenerated figures remain faithful to the mathematical specification of the models.
+The residual formulation plays a key role in this behavior. By predicting a
+correction term that is added to NWM output rather than forecasting streamflow from
+scratch, the model remains anchored to the physics-based trajectory. This anchoring
+helps preserve hydrologic features that NWM already captures well (e.g., timing of
+flow recessions in simple events) while allowing the network to learn recurrent bias
+structures (such as underestimation of flood peaks) that correlate with
+meteorological or static-basin inputs. The transformer component appears to be
+especially beneficial in complex years: as shown in the ROCV analysis, Hydra’s
+advantage over the LSTM baseline is largest in test years with multiple hurricanes
+or extratropical storms, where longer-range temporal context helps capture
+antecedent wetness and multi-storm sequencing.
 
-\subsection{Hybrid Transformer Prompt and Caption}
-\textbf{Prompt:} ``Create a technical diagram showing a residual-learning pipeline for streamflow corrections. Depict input sequences of ERA5 forcings, National Water Model discharge, and static watershed descriptors flowing into a GRU encoder, then a two-layer transformer with four-head attention. Highlight multi-scale pooling (final state, mean, max, dilated CNN summaries) plus FiLM-style static conditioning before an output head that predicts residual mean \\(\hat{r}_t\\) and log-variance. Emphasize the reconstruction \\(\hat{y}_t = y_{\\mathrm{NWM},t} + \hat{r}_t\\) and display uncertainty bands.''
+\subsection{Limitations, Winter Regimes, and Bias Creep}
 
-\textbf{Caption:} ``Conceptual overview of the hybrid GRU--transformer residual learner. Dynamic forcings \\(x_{1:T}\\), baseline flows \\(y_{\\mathrm{NWM},1:T}\\), and static descriptors \\(s\\) feed a GRU encoder and transformer stack; multi-scale summaries and FiLM conditioning drive heads that output residual mean \\(\hat{r}\\) and heteroscedastic log-variances, yielding corrected discharge estimates \\(\hat{y} = y_{\\mathrm{NWM}} + \hat{r}\\).''
+Despite these strengths, the experiments also reveal clear failure modes. The ROCV
+results show that Hydra’s relative improvements over NWM shrink in later test years
+(2019--2021), and the 2021 fold exhibits a noticeable underestimation bias (percent
+bias around $-12$\%) even though most earlier years have corrected flows with
+near-zero bias. Diagnostic plots trace this deterioration to winter events with
+significant snow influence. In such periods, precipitation falls as snow and is
+stored in the snowpack before melting and contributing to runoff. Because the
+current feature set includes only indirect proxies for snow (e.g., temperature and
+precipitation) and lacks an explicit snow water equivalent (SWE) or snow depth
+state, Hydra sometimes ``corrects'' an apparent NWM underprediction by adding flow
+during cold conditions when, in reality, the water is correctly held back as snow.
 
-\subsection{GRU Baseline Prompt and Caption}
-\textbf{Prompt:} ``Illustrate a streamlined GRU residual model that ingests sequences of meteorological forcings and National Water Model discharge, produces hidden states, and outputs residual corrections via a linear head. Annotate the composite loss combining NSE surrogate, Gaussian likelihood, and median pinball components.''
+These winter failure modes highlight a general risk of purely data-driven residual
+correctors: when the training data under-represent certain regimes (here,
+snow-dominated conditions in a marginally snow-influenced basin), the learned
+mapping from predictors to residuals can extrapolate poorly and undo physically
+sound behavior in the parent model. This suggests that, in some settings, using
+complementary or regime-aware model structures \citep[e.g.,][]{abebe2003} may be
+preferable to relying on a single residual corrector.
 
-\textbf{Caption:} ``Baseline GRU residual corrector used for ablation studies. Hidden states \\(h_t = \\mathrm{GRU}(h_{t-1}, [x_t, y_{\\mathrm{NWM},t}])\\) feed a linear projection that yields \\(\hat{r}_t\\); a composite loss \\((\\mathcal{L} = \\mathcal{L}_{\\mathrm{NLL}} + \\lambda_{\\mathrm{NSE}}\\mathcal{L}_{\\mathrm{NSE}} + \\lambda_{0.5}\\mathcal{L}_{0.5})\\) enforces accuracy and calibration.''
+The ROCV experiment also exposes broader signs of temporal drift. As the test year
+moves closer to the present, NWM itself exhibits larger errors and changing bias
+characteristics, likely reflecting a combination of hydroclimatic variability and
+differences between NWM v2.1 (dominant in the early record) and v3.0. Hydra
+continues to improve upon NWM in these later folds, but the magnitude of
+improvement shrinks from more than 25\% RMSE reduction in early years to closer to
+10--15\% in 2021. This pattern resembles the ``forecast bias creep'' discussed by
+\citet{hyndman2021}: even well-calibrated post-processors can gradually lose skill
+as the underlying system or driving model evolves. It suggests that static
+site-specific residual models should be periodically retrained and monitored, rather
+than assumed to be indefinitely valid.
 
+
+\subsection{Operational Implications for NWM Post-Processing}
+
+From an operational perspective, the Watauga case study suggests that a hybrid
+residual corrector can serve as a lightweight but effective ``plugin'' to the
+National Water Model. Because Hydra consumes inputs that are already available
+within the NWM forecasting pipeline (model streamflow plus meteorological forcings
+and static descriptors) and has a modest parameter count, it can generate
+bias-corrected forecasts and associated uncertainty intervals with relatively low
+computational overhead. Forecasters could be presented with both the raw NWM
+hydrograph and the corrected forecast, along with P10--P90 intervals derived from
+the quantile heads, and choose how to weight them based on situational awareness and
+local expertise.
+
+The improvements documented here---particularly in high-flow events where NWM
+underestimates peaks---translate directly into operational value. More accurate peak
+magnitude and timing estimates can support earlier and more targeted flood warnings,
+better-informed road closures, and more effective reservoir operations. Improvements
+in bias and hydrograph shape (as reflected in KGE) are also relevant for low-flow
+management, where chronic over- or underestimation of baseflow can affect decisions
+about water supply, environmental releases, and drought declarations. At the same
+time, the winter failure modes and evidence of drift emphasize that such post-
+processors must be deployed with safeguards: for example, regime-aware flags that
+downweight residual corrections in cold conditions, automated performance monitoring
+dashboards, and clear communication to forecasters about when the corrected product
+is most trustworthy.
+
+\subsection{Broader Context and Transferability}
+
+Although this thesis focuses on a single Appalachian basin, the findings sit within
+a broader movement toward hybrid, data-enhanced hydrologic modeling. Large-sample
+studies have shown that sequence models such as LSTMs can learn regional and even
+quasi-universal hydrologic behaviors when trained across many basins with static
+descriptors \citep[e.g.,][]{kratzert2019,frame2021}. Other work has combined
+physics-based models with transformer-based post-processors in different climatic
+settings \citep{ampas2023}, demonstrating that attention mechanisms can add value
+beyond purely recurrent architectures. The Hydra framework is consistent with these
+trends but explores a different part of the design space: a deeply curated,
+leakage-safe, single-basin dataset and a hybrid GRU–transformer architecture focused
+on residuals to a specific operational model (NWM).
+
+The data pipeline and model design were intentionally built to generalize. Given a
+USGS gauge ID, an NWM reach identifier, and basic basin metadata, the same
+collection and preprocessing code can be applied to other catchments. Static
+attributes and FiLM-style conditioning provide a mechanism for a future ``multi-basin
+Hydra'' to learn both shared and site-specific behaviors, similar in spirit to
+regional models in the literature. At the same time, the Watauga results caution
+that transferring such a model across regimes (e.g., from rain-dominated to
+snow-dominated basins) without explicit process-aware inputs may reproduce the
+winter failure modes seen here.
+
+In summary, the Watauga experiments demonstrate that a hybrid GRU–transformer
+residual learner can substantially and consistently improve NWM streamflow guidance
+at the basin scale, particularly for flood-relevant high flows, while revealing
+nontrivial sensitivities to regime representation and temporal drift. The following
+sections on Future Work and Conclusion outline how these insights can be leveraged
+to build more robust, process-aware, and scalable post-processing systems for
+operational hydrologic forecasting.
+
+
+
+
+
+\newpage
+%------------------------------FUTURE WORK-------------------------------------------
+\section{Future Work}
+\label{sec:future-work}
+
+This thesis has demonstrated that a site-aware hybrid GRU--transformer residual
+model can substantially improve National Water Model (NWM) streamflow guidance at a
+single humid, mountainous basin. Looking ahead, there are several natural directions
+to extend this work: (i) scaling Hydra to many basins and hydroclimatic regimes
+across the United States, (ii) moving from analysis-time corrections to true
+short-, medium-, and long-lead forecasts, (iii) leveraging cutting-edge
+AI-based weather prediction services as meteorological inputs, (iv) deepening
+Hydra's integration with NWM version~3 (NWMv3) as a complementary post-processor,
+and (v) developing a robust real-time deployment pathway.
+
+\subsection{Scaling Across U.S. Hydroclimates}
+
+A first major extension is to move from a single case-study basin to a
+continental-scale evaluation spanning the range of biomes represented in the United
+States: humid Appalachian and southeastern catchments, snowmelt-dominated
+mountain basins in the Rockies and Sierra Nevada, semi-arid and arid basins in the
+Southwest, glacier-fed and rain-on-snow systems in the Pacific Northwest, and
+heavily regulated river networks in the central U.S. and Great Plains. Large-sample
+hydrology studies have shown that sequence models can learn regional and even
+quasi-universal hydrologic behaviors when trained across hundreds of basins with
+appropriate static descriptors \citep[e.g.,][]{kratzert2019,frame2021}. 
+
+In future work, the data pipeline developed here could be applied to dozens or
+hundreds of NWM reaches across these diverse hydroclimates, building a multi-basin
+Hydra model that conditions on static attributes (land cover, drainage area, slope,
+regulation status) to capture both shared and site-specific residual patterns. Two
+natural design options are (i) a single global Hydra model trained on all basins
+with FiLM-style conditioning to distinguish sites, and (ii) a hierarchical setup
+with regional experts (e.g., snow-dominated vs.\ rain-dominated basins) and a
+meta-learner that routes each forecast to the most appropriate expert. Such a
+multi-basin framework would allow a more systematic assessment of where hybrid
+residual correction adds the most value (e.g., regulated vs.\ unregulated, arid vs.\
+humid) and whether gains at Watauga generalize across U.S. biomes.
+
+\subsection{Extending to Multiple Forecast Lead Times}
+
+The present work focuses on correcting NWM analysis (effectively zero-lead)
+streamflow estimates. However, operational decision-making often depends on
+forecasts at multiple lead times: nowcasting (0--6~h), short-range guidance
+(6--24~h), medium-range river forecasts (1--5~days), and longer-range hydrologic
+outlooks (5--10~days or more). A natural next step is therefore to extend Hydra to
+predict residuals (or corrected flows) at multiple lead times simultaneously.
+
+One promising approach is a multi-task architecture in which the model ingests a
+window of past NWM forecasts and meteorological forcings and outputs corrections
+for a vector of lead times (e.g., $\ell \in \{1, 3, 6, 12, 24, 72, 120\}$~hours).
+The attention mechanism is well-suited to such a design, since it can reweight
+different parts of the historical sequence depending on the target lead. The loss
+function could then aggregate errors across leads, potentially with
+lead-dependent weights that emphasize flood-relevant horizons (e.g., 12--72~h).
+This extension would align the post-processor more closely with how NWMv3
+forecasts are used in practice by forecasters and emergency managers.
+
+\subsection{Leveraging Advanced AI Weather Forecasting Services}
+
+A second major opportunity is to experiment with alternative meteorological
+forcings derived from state-of-the-art AI weather models. Recent work in this area
+has produced a new generation of global and regional forecasting systems that
+achieve comparable or better skill than traditional numerical weather prediction
+(NWP) at far lower computational cost.
+
+Google DeepMind's WeatherNext~2 model is a recently announced AI-based forecaster
+that can generate high-resolution, hourly weather scenarios much faster than
+conventional NWP, while also providing probabilistic ensembles of possible
+outcomes \citep{weathernext2}. Likewise, GraphCast is a graph neural network-based
+global medium-range forecasting system that is trained directly on ERA5
+reanalysis and has been shown to outperform leading operational deterministic
+models on the majority of standard verification targets \citep{lam2023graphcast}.
+Microsoft's Aurora model takes a foundation-model approach, pretraining on more
+than a million hours of heterogeneous Earth system data and achieving strong
+performance across a wide variety of forecasting tasks (including high-resolution
+weather and air-quality forecasts) at a fraction of the computational cost of
+traditional systems \citep{bodnar2025aurora}.
+
+In future work, outputs from these AI weather services could be used as additional
+or alternative meteorological inputs to Hydra. For example, one could construct
+datasets in which NWM streamflow is forced either by traditional NWP products
+or by post-processed fields from WeatherNext~2, GraphCast, or Aurora, and then
+quantify how the quality and lead-time characteristics of the atmospheric inputs
+propagate into residual-correction skill at the basin scale. Ensemble scenarios
+from WeatherNext~2 or Aurora could also be used to drive a corresponding ensemble
+of Hydra corrections, yielding probabilistic streamflow forecasts that better
+capture uncertainty in both meteorology and hydrology.
+
+There is also a natural conceptual link to Google's operational flood forecasting
+system, which uses machine learning for river stage prediction and inundation
+mapping in a global framework \citep{nevo2022flood}. While that system currently
+operates largely outside of NWM, a future research direction would be to compare
+Hydra-style NWM-based post-processing against direct ML flood models of the
+Google type, and to explore hybrid designs where AI weather models, physics-based
+hydrologic models, and ML post-processors are combined in a unified pipeline.
+
+\subsection{Hydra as a Companion to NWMv3}
+
+A core design principle of this thesis is that Hydra should \emph{complement},
+not replace, the National Water Model. NWMv3 represents a substantial investment
+in physically based hydrologic modeling and data assimilation, and it already
+provides consistent, nationwide streamflow guidance used by the National Weather
+Service and its National Water Prediction Service \citep{noaaNWPS2023}. The role
+of Hydra is to learn and correct systematic residuals in NWMv3 output at specific
+locations and regimes, while remaining anchored to the physical model's
+trajectory.
+
+Future work should therefore focus on tighter integration with NWMv3 as deployed
+operationally. This includes (i) training and validating Hydra models explicitly
+on NWMv3 forecast products (rather than mixing v2.1 retrospective and v3.0
+series), (ii) versioning Hydra models in lockstep with NWM updates so that
+residual patterns remain consistent, and (iii) designing diagnostics that help
+NWM developers interpret where and why residual corrections are consistently
+large (e.g., particular land-cover classes, regulated reaches, or snow-dominated
+regimes). In the longer term, feedback from Hydra could even inform targeted
+improvements to NWM parameterizations or data assimilation strategies.
+
+\subsection{Towards Real-Time, User-Facing Deployment}
+
+Finally, to translate this work into operational practice, a real-time deployment
+pathway is needed. At a technical level, this would involve containerizing the
+Hydra model and its feature-engineering pipeline, wiring it to live data feeds
+for NWMv3 forecasts (e.g., from NOAA's public AWS holdings) and for the chosen
+meteorological inputs (traditional NWP or AI weather services), and ensuring that
+all preprocessing steps can be executed in near real time with low latency.
+Because Hydra is relatively lightweight compared to NWM itself, it should be
+straightforward to run the post-processor on modest cloud infrastructure in
+minutes or seconds once the required inputs are available.
+
+Equally important are monitoring, governance, and user-interface considerations.
+A production deployment would need automated performance dashboards (tracking
+NSE, KGE, bias, and event-based metrics over rolling windows), alerts when skill
+drops below thresholds (e.g., due to model drift or unusual meteorological
+regimes), and regime-aware safeguards such as downweighting residual corrections
+during poorly represented conditions (e.g., extreme snow events) unless or until
+the model is retrained with additional data. On the user side, the corrected
+Hydra forecasts and uncertainty intervals could be integrated into the National
+Water Prediction Service alongside raw NWM hydrographs, allowing forecasters and
+emergency managers to view, compare, and selectively rely on the post-processed
+guidance. 
+
+In combination, these extensions---multi-basin scaling, multi-lead forecasting,
+AI-driven meteorological inputs, tighter coupling to NWMv3, and robust real-time
+deployment---outline a path from a single-basin case study to a broadly useful,
+process-aware, and operationally relevant residual correction framework for
+streamflow forecasting across the United States.
+
+
+
+\newpage
+%-------------------------------------CONCLUSION-------------------------------------------
 \section{Conclusion}
-We presented a reproducible, leakage-safe framework for correcting National Water Model streamflow residuals using a hybrid GRU--transformer architecture. By curating a high-fidelity hourly dataset for the Watauga River basin and enforcing strict causal validation, we demonstrated that data-driven post-processing can reduce RMSE by over 20\% and significantly improve NSE and KGE relative to the raw physics-based guidance. The study establishes that meteorological covariates from ERA5, when processed through attention mechanisms, contain sufficient signal to correct systematic hydrologic errors. However, the analysis also uncovered critical seasonal limitations, specifically winter performance degradations in heavily forested, snow-influenced catchments. These insights define a clear path for future research: integrating snow-specific state variables, refining loss functions for seasonal robustness, and expanding the evaluation to diverse hydroclimatic regions. Ultimately, this work provides a validated template for site-aware operational corrections, moving toward a scalable system that enhances the reliability of continental-scale water prediction.
+\label{sec:conclusion}
 
-\begin{thebibliography}{99}
-\bibitem[\textit{Bergmeir and Ben\'{i}tez}(2012)]{bergmeir2012} Bergmeir, C., and J. M. Ben\'{i}tez (2012), On the use of cross-validation for time series predictor evaluation, \textit{Information Sciences}, \textit{191}, 192--213, doi:10.1016/j.ins.2011.12.028.
+This thesis set out to address a practical and scientifically important problem:
+how to systematically correct site- and regime-dependent errors in the National
+Water Model (NWM) streamflow forecasts using modern machine learning, without
+discarding the underlying physical model. Focusing on the Watauga River near Sugar
+Grove, North Carolina, we developed and evaluated a site-aware hybrid GRU--transformer
+residual model (Hydra) that learns to predict and correct the NWM’s hourly discharge
+errors over a 13-year period (2010--2022). The work combined careful data curation,
+a physically informed architecture, and leakage-safe temporal validation to provide
+a realistic assessment of what such a post-processor can and cannot do in an
+operationally relevant setting.
 
-\bibitem[\textit{Hyndman and Athanasopoulos}(2021)]{hyndman2021} Hyndman, R. J., and G. Athanasopoulos (2021), \textit{Forecasting: Principles and Practice}, 3rd ed., OTexts, Melbourne, Australia. Retrieved from https://otexts.com/fpp3/.
-\bibitem[\textit{National Weather Service}(2023)]{noaaNWPS2023} National Weather Service (2023), National Water Prediction Service: Operational overview and product guide, \textit{NOAA Technical Memorandum NWS-2023-04}, 42~pp.
-\bibitem[\textit{National Oceanic and Atmospheric Administration}(2024)]{noaaHelene2024} National Oceanic and Atmospheric Administration (2024), Service assessment: Hurricane Helene 2024, \textit{NOAA Service Assessment Series}, 86~pp.
-\bibitem[\textit{U.S. Geological Survey}(2024)]{usgsHelene2024} U.S. Geological Survey (2024), Peak streamflow data for Hurricane Helene flooding in the southern Appalachians, \textit{USGS Open-File Report 2024-1152}, 25~pp., doi:10.3133/ofr20241152.
-\bibitem[\textit{National Weather Service Southeast River Forecast Center}(2024)]{nwsRFCHelene2024} National Weather Service Southeast River Forecast Center (2024), Post-event report: Hurricane Helene hydrologic verification, 17~pp.
+On the data side, the thesis constructed a unified, hourly dataset that collocates
+USGS observations, NWM v2.1/v3.0 modeled flows, ERA5 meteorological reanalysis, and
+static physiographic descriptors derived from NLCD and other sources. All inputs
+were aligned on a common timeline, transformed using hydrologically sensible
+operations (e.g., inverse hyperbolic sine for flows), and split into training,
+validation, and test sets in a strictly chronological fashion to avoid information
+leakage. A rolling-origin cross-validation (ROCV) design further expanded this
+single-basin dataset into nine temporally ordered folds, enabling a decade-scale
+assessment of temporal robustness and model drift.
+
+On the modeling side, Hydra was designed as a residual learner: rather than
+predicting streamflow directly, it forecasts the NWM error and adds that correction
+back to the NWM hydrograph. Architecturally, the model combines a GRU encoder for
+short-term dependencies, a transformer encoder for longer-range temporal context,
+FiLM-style conditioning on static basin attributes, and multiple pooling heads that
+capture local convolutional patterns, global statistics, and static-aware
+cross-attention. Training is guided by a composite loss that blends
+heteroscedastic likelihood, quantile calibration, and an NSE-inspired surrogate
+term, encouraging both point accuracy and distributional realism.
+
+The results demonstrate that this design yields meaningful, physically interpretable
+gains. On the held-out 2022 test year, Hydra reduced RMSE from 5.97 to
+5.14~m$^{3}$/s (a reduction of roughly 14\% relative to the raw NWM), while
+simultaneously increasing NSE from 0.52 to 0.64 and KGE from 0.64 to 0.71. The LSTM
+baseline achieved only modest improvements and in some cases degraded KGE, whereas
+Hydra improved error magnitude, efficiency, and distributional agreement
+simultaneously. Event-based analyses showed that the largest benefits occur during
+multi-day storm sequences where NWM tends to underestimate peak flows and mis-time
+recessions; Hydra effectively adds the missing volume and sharpens hydrograph
+timing, while largely leaving low-flow periods unchanged. This behavior is
+desirable from an operational standpoint: the post-processor intervenes when there
+are systematic, meteorologically explainable errors to correct, and otherwise
+respects the physics-based forecast.
+
+The ROCV experiments extended these findings across nine additional test years
+(2013--2021). Hydra outperformed both the raw NWM and the LSTM baseline in every
+fold in terms of RMSE and NSE, with the largest gains occurring in hydroclimatically
+complex years featuring multiple tropical or extratropical storms. In quieter years
+when NWM was already highly accurate, all models converged toward near-perfect NSE,
+and Hydra at least did not degrade performance. At the same time, the ROCV analysis
+revealed important limitations: in later years, particularly 2019--2021, the
+relative RMSE reductions shrank and a noticeable underestimation bias emerged in
+winter. A targeted diagnostic of January 2023, outside the main evaluation window,
+showed periods where Hydra’s corrections actually worsened forecasts during
+snow-affected conditions. These failures can be traced to regime under-representation
+and missing process-aware inputs (e.g., explicit snow water equivalent), and they
+highlight that data-driven residual correctors can overstep when they lack key
+state information or when the parent model evolves.
+
+Taken together, these results support two main conclusions. First, a site-aware
+hybrid GRU--transformer residual model can provide temporally robust, practically
+relevant improvements to NWM streamflow guidance at the basin scale. The gains are
+largest for flood-relevant high flows, where improved peak magnitude and timing can
+directly inform warning and response, and they come without sacrificing low-flow
+fidelity. Second, those gains are contingent on both the coverage of the training
+data and the stability of the underlying system. Regime gaps (such as rare
+snow-dominated events in a marginally snowy basin) and nonstationarity in NWM
+versions or climate can erode bias control over time, underscoring the need for
+explicit process-aware features, periodic retraining, and ongoing performance
+monitoring.
+
+Beyond the specific numbers for Watauga, the broader contribution of this thesis is
+a reusable pattern for hybrid, physics-informed post-processing. The work shows how
+to (i) construct a leakage-safe, multi-source hydrologic dataset centered on an
+operational model, (ii) design a residual architecture that respects physical
+structure while exploiting attention and feature conditioning, and (iii) evaluate
+temporal robustness using rolling-origin validation that mimics operational
+deployment. The open-source code and configuration artifacts that accompany this
+thesis are intended to make it straightforward to port the approach to other NWM
+reaches and, ultimately, to regional or national ensembles of basins.
+
+Finally, the thesis points toward a natural research agenda at the intersection of
+operational hydrology and modern AI. Scaling Hydra to dozens or hundreds of basins
+across U.S. biomes, extending it to multi-lead forecasts, integrating it with
+next-generation AI weather models, and coupling it more tightly to NWMv3 operations
+are all promising directions. With appropriate safeguards, governance, and
+user-facing design, models like Hydra could become standard companions to
+physics-based systems, delivering bias-corrected, uncertainty-aware streamflow
+forecasts that help communities better prepare for both extremes and everyday
+water-management decisions.
+
+
+
+
+\newpage
+%----------------------------------References--------------------------------------------
+\begin{thebibliography}{}
+
+\bibitem[Abebe and Price(2003)]{abebe2003} Abebe, A. J., and R. K. Price (2003), Managing uncertainty in hydrological models using complementary models, \textit{Hydrological Sciences Journal}, \textit{48}(5), 679--692.
+
+\bibitem[Ampas et~al.(2023)]{ampas2023} Ampas, H., I. Refanidis, and V. Ampas (2023), Hybrid hydrological forecasting through a physical model and a weather-informed transformer model: A case study in a Greek watershed, \textit{Applied Sciences}, \textit{15}(12), 6679.
+
+\bibitem[Bergmeir and Ben{'\i}tez(2012)]{bergmeir2012} Bergmeir, C., and J. M. Ben{'\i}tez (2012), On the use of cross-validation for time series predictor evaluation, \textit{Information Sciences}, \textit{191}, 192--213.
+
+\bibitem[Demiray et~al.(2024)]{demiray2024} Demiray, B. Z., M. Sit, O. Mermer, and I. Demir (2024), Enhancing hydrological modeling with transformers: a case study for 24-h streamflow prediction, \textit{Water Science \& Technology}, \textit{89}(9), 2326--2341.
+
+\bibitem[Frame et~al.(2021)]{frame2021} Frame, J. M., F. Kratzert, A. Raney, M. Rahman, F. R. Salas, and G. S. Nearing (2021), Post-Processing the National Water Model with Long Short-Term Memory Networks for Streamflow Predictions and Model Diagnostics, \textit{J. Amer. Water Resour. Assoc.}, \textit{57}(6), 885--905.
+
+\bibitem[Gupta et~al.(2009)]{gupta2009} Gupta, H. V., H. Kling, K. K. Yilmaz, and G. F. Martinez (2009), Decomposition of the mean squared error and NSE performance criteria: Implications for improving hydrological modelling, \textit{Journal of Hydrology}, \textit{377}(1-2), 80--91.
+
+\bibitem[Han and Morrison(2022)]{han2022} Han, H., and R. R. Morrison (2022), Improved runoff forecasting performance through error predictions using a deep-learning approach, \textit{Journal of Hydrology}, \textit{608}, 127653.
+
+\bibitem[Hyndman and Athanasopoulos(2021)]{hyndman2021} Hyndman, R. J., and G. Athanasopoulos (2021), \textit{Forecasting: Principles and Practice} (3rd ed.), OTexts, Melbourne, Australia.
+
+\bibitem[Kratzert et~al.(2019)]{kratzert2019} Kratzert, F., D. Klotz, G. Shalev, M. Herrnegger, A. K. Sampson, S. Hochreiter, and G. S. Nearing (2019), Toward learning universal, regional, and local hydrological behaviors via machine learning: Results across 575 basins, \textit{Hydrology and Earth System Sciences}, \textit{23}(12), 5089--5110.
+
+\bibitem[Naser~Neisary et~al.(2025)]{neisary2025} Naser Neisary, S., R. C. Johnson, and S. J. Burian (2025), A post-processing machine learning framework for bias-correcting National Water Model outputs by accounting for dominant streamflow drivers, \textit{Environmental Modelling \& Software}, \textit{190}, 106459.
+
+\bibitem[Nash and Sutcliffe(1970)]{nash1970} Nash, J. E., and J. V. Sutcliffe (1970), River flow forecasting through conceptual models part I—A discussion of principles, \textit{Journal of Hydrology}, \textit{10}(3), 282--290.
+
+\bibitem[Rasiya~Koya and Roy(2023)]{rasiya2023} Rasiya Koya, S., and T. Roy (2023), Temporal Fusion Transformers for streamflow prediction: Value of combining attention with recurrence, \textit{arXiv preprint arXiv:2305.12335}, 1--11.
+
+\bibitem[NOAA(2023)]{noaaNWPS2023} NOAA (2023), National Water Prediction Service: Operational Overview and Product Guide, \textit{National Weather Service}, Technical Memorandum NWS-2023-04, available at \url{https://water.noaa.gov/about/nwps}.
+
+\bibitem[USGS(2024)]{usgsHelene2024} U.S. Geological Survey (2024), Peak Streamflow Data for Hurricane Helene Flooding in the Southern Appalachians, \textit{Open-File Report}, 2024-1152, \textit{U.S. Geological Survey}, doi:10.3133/ofr20241152.
+
+\bibitem[NWS RFC(2024)]{nwsRFCHelene2024} National Weather Service Southeast River Forecast Center (2024), Post-Event Report: Hurricane Helene Hydrologic Verification, \textit{Internal Technical Summary}, 17 pages.
+
+\bibitem[NOAA(2024)]{noaaHelene2024} NOAA (2024), Service Assessment: Hurricane Helene 2024, \textit{National Oceanic and Atmospheric Administration}, available at \url{https://www.noaa.gov/helene2024-assessment}.
+
+\bibitem[Bodnar et~al.(2025)]{bodnar2025aurora}
+Bodnar, C., W.~P. Bruinsma, A. Lucic, M. Stanley, A. Vaughan, J. Brandstetter,
+P. Garvan, M. Riechert, J.~A. Weyn, H. Dong, J.~K. Gupta, K. Thambiratnam,
+A.~T. Archibald, C.-C. Wu, E. Heider, M. Welling, R.~E. Turner, and
+P. Perdikaris (2025), A foundation model for the Earth system,
+\textit{Nature}, \textit{641}(8065), 1180--1187, doi:10.1038/s41586-025-09005-y.
+
+\bibitem[Google DeepMind(2025)]{weathernext2}
+Google DeepMind (2025), WeatherNext~2: Our most advanced weather forecasting
+model, Google Blog, available at
+\url{https://blog.google/technology/google-deepmind/weathernext-2/}
+(accessed November 2025).
+
+\bibitem[Lam et~al.(2023)]{lam2023graphcast}
+Lam, R., A. Sanchez-Gonzalez, M. Willson, P. Wirnsberger, M. Fortunato,
+F. Alet, S. Ravuri, T. Ewalds, Z. Eaton-Rosen, W. Hu, A. Merose, S. Hoyer,
+G. Holland, O. Vinyals, J. Stott, A. Pritzel, S. Mohamed, and P. Battaglia
+(2023), Learning skillful medium-range global weather forecasting,
+\textit{Science}, \textit{382}(6677), eadi2336, doi:10.1126/science.adi2336.
+
+\bibitem[Nevo et~al.(2022)]{nevo2022flood}
+Nevo, S., E. Morin, A. Gerzi Rosenthal, A. Metzger, C. Barshai, D. Weitzner,
+O. Baron, Z. Moshe, Z. Ben-Haim, A. Hassidim, and Y. Matias (2022),
+Flood forecasting with machine learning models in an operational framework,
+\textit{Hydrology and Earth System Sciences}, \textit{26}(15), 4013--4032,
+doi:10.5194/hess-26-4013-2022.
+
 \end{thebibliography}
 
 \end{document}

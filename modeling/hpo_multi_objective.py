@@ -6,7 +6,7 @@ simultaneously maximising NSE and KGE. Trials are pruned with ASHA to keep the
 runtime manageable on a single M1/M2 laptop. Example call:
 
     PYTHONPATH=. python modeling/hpo_multi_objective.py \
-        --data data/clean/modeling/hourly_training_2010-01-01_2022-12-31.parquet \
+        --data data/clean/modeling/hourly_training_03479000_20100101_20201231.parquet \
         --study-name watauga_multiobj \
         --storage sqlite:///local_only/hpo/watauga_multiobj.db \
         --n-trials 18 \
@@ -208,7 +208,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=25)
     parser.add_argument("--batch-size", type=int, default=1024)
     parser.add_argument("--patience", type=int, default=4)
-    parser.add_argument("--train-days", type=int, default=4018)
+    parser.add_argument("--train-days", type=int, default=3287)
     parser.add_argument("--val-days", type=int, default=365)
     parser.add_argument("--weight-kge", type=float, default=0.05)
     parser.add_argument("--weight-kge-final", type=float, default=None)

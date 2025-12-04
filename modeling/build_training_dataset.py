@@ -4,7 +4,6 @@ Build an hourly, multi-year training dataset by aligning:
 - NWM hourly analysis (CHRTOUT) from retrospective datasets (v2.1: 1979–2020, v3.0: 2021–2023)
 - USGS observed streamflow (hourly, UTC)
 - ERA5/ERA5-Land environmental features (hourly preferred; 6-hourly acceptable with safe alignment)
-- NLCD 2021 static land cover metrics
 
 Targets:
 - y_residual_cms = usgs_obs_cms - nwm_cms  (per valid_time)
@@ -19,8 +18,6 @@ Assumptions:
     timestamp (valid_time), streamflow_cms, site_name, comid
 - USGS hourly CSVs exist per site under data/raw/usgs/*{usgs_id}*.csv with columns timestamp, flow_cms or flow_cfs
 - ERA5 CSVs exist per site/month under data/raw/era5/** with at least timestamp and environmental columns
-- NLCD metrics exist at data/raw/land_use/nlcd_2021_land_use_metrics.csv with site-level or bbox-level features
-
 Notes:
 - If ERA5 is 6-hourly, we align to hourly via reindex with nearest tolerance=3H (no forward-looking leakage)
 - We filter to timestamps where both NWM and USGS obs exist to form targets
@@ -58,16 +55,35 @@ def _read_many_csv(patterns: List[str], usecols: Optional[List[str]] = None) -> 
     return pd.concat(frames, ignore_index=True)
 
 
-def load_nwm_hourly(raw_dir: str) -> pd.DataFrame:
+def _candidate_globs(raw_dir: str, nwm_version: str) -> List[str]:
+    version = nwm_version.lower()
+    if version == 'v2':
+        return [
+            os.path.join(raw_dir, 'nwm_v2', 'retrospective', '*.csv'),
+            os.path.join(raw_dir, 'nwm_v2', '*', 'retrospective', '*.csv'),
+            os.path.join(raw_dir, 'nwm_v2p1', 'retrospective', '*.csv'),
+            os.path.join(raw_dir, 'nwm_v2p1', '*', 'retrospective', '*.csv'),
+            os.path.join(raw_dir, 'nwm_v2_test', 'retrospective', '*.csv'),
+            os.path.join(raw_dir, 'nwm_v2_test', '*', 'retrospective', '*.csv'),
+            os.path.join(raw_dir, 'nwm_v3', 'retrospective', '*v2p1*.csv'),
+        ]
+    if version == 'v3':
+        return [
+            os.path.join(raw_dir, 'nwm_v3', 'retrospective', '*.csv'),
+        ]
+    raise ValueError(f"Unsupported NWM version '{nwm_version}'. Expected 'v2' or 'v3'.")
+
+
+def load_nwm_hourly(raw_dir: str, nwm_version: str = 'v2') -> pd.DataFrame:
     """Load hourly NWM analysis (CHRTOUT) from retrospective sources only.
     Returns columns: [timestamp, site_name, comid, nwm_cms]
     """
-    pats = [
-        os.path.join(raw_dir, 'nwm_v3', 'retrospective', '*.csv'),
-    ]
+    pats = _candidate_globs(raw_dir, nwm_version)
     df = _read_many_csv(pats)
     if df is None or df.empty:
-        raise FileNotFoundError("No NWM hourly CSVs found under data/raw/nwm_v3/retrospective")
+        raise FileNotFoundError(
+            f"No NWM hourly CSVs found under data/raw/nwm_{nwm_version.lower()}/retrospective"
+        )
     # Normalize columns
     if 'timestamp' not in df.columns:
         raise ValueError("NWM retrospective CSVs must include 'timestamp'")
@@ -95,7 +111,10 @@ def load_nwm_hourly(raw_dir: str) -> pd.DataFrame:
 
 
 def load_usgs_hourly(raw_dir: str, usgs_id: str) -> pd.DataFrame:
-    pats = [os.path.join(raw_dir, 'usgs', f"*{usgs_id}*.csv")]
+    pats = [
+        os.path.join(raw_dir, 'usgs', usgs_id, '*.csv'),
+        os.path.join(raw_dir, 'usgs', f"*{usgs_id}*.csv"),
+    ]
     df = _read_many_csv(pats)
     if df is None or df.empty:
         raise FileNotFoundError(f"No USGS CSVs found for {usgs_id}")
@@ -147,15 +166,19 @@ def load_usgs_hourly(raw_dir: str, usgs_id: str) -> pd.DataFrame:
     return out
 
 
-def load_era5_features(raw_dir: str, site_name: str) -> Optional[pd.DataFrame]:
+def load_era5_features(raw_dir: str, site_name: str, site_id: Optional[str] = None, comid: Optional[int] = None) -> Optional[pd.DataFrame]:
     # ERA5 files likely live under data/raw/era5/<site>/*.csv, or per-site folders like data/raw/era5/<comid>/*.csv.
     # Try nested globs and a general fallback.
+    site_slug = site_name.replace(' ', '_').lower()
     possible = [
-        os.path.join(raw_dir, 'era5', site_name.replace(' ', '_').lower(), '*.csv'),
+        os.path.join(raw_dir, 'era5', str(site_id or ''), '*.csv') if site_id else '',
+        os.path.join(raw_dir, 'era5', site_slug, '*.csv'),
+        os.path.join(raw_dir, 'era5', str(comid or ''), '*.csv') if comid else '',
         os.path.join(raw_dir, 'era5', '**', '*.csv'),
         os.path.join(raw_dir, 'era5', '*.csv'),
     ]
-    df = _read_many_csv(possible)
+    patterns = [p for p in possible if p]
+    df = _read_many_csv(patterns)
     if df is None or df.empty:
         return None
     # Require timestamp column
@@ -190,29 +213,18 @@ def load_era5_features(raw_dir: str, site_name: str) -> Optional[pd.DataFrame]:
     return hourly
 
 
-def load_nlcd_metrics(raw_dir: str) -> Optional[pd.DataFrame]:
-    path = os.path.join(raw_dir, 'land_use', 'nlcd_2021_land_use_metrics.csv')
-    if not os.path.exists(path):
-        return None
-    try:
-        df = pd.read_csv(path)
-    except Exception:
-        return None
-    # Expect site_name or some key; we’ll attempt a permissive join later
-    return df
-
-
 def build_dataset(
     raw_dir: str = 'data/raw',
     out_dir: str = 'data/clean/modeling',
     start: Optional[str] = None,
     end: Optional[str] = None,
     sites: Optional[Iterable[str]] = None,
+    nwm_version: str = 'v2',
 ) -> pd.DataFrame:
     os.makedirs(out_dir, exist_ok=True)
 
     # Load NWM (multi-site, hourly only)
-    nwm = load_nwm_hourly(raw_dir)
+    nwm = load_nwm_hourly(raw_dir, nwm_version=nwm_version)
     if start:
         nwm = nwm[nwm['timestamp'] >= pd.to_datetime(start)]
     if end:
@@ -241,7 +253,7 @@ def build_dataset(
         # Load USGS hourly
         usgs = load_usgs_hourly(raw_dir, usgs_id)
         # Load ERA5 features (optional)
-        era5 = load_era5_features(raw_dir, site_name)
+        era5 = load_era5_features(raw_dir, site_name, site_id=site_id, comid=comid)
         # Merge
         df = nwm_site.merge(usgs, on='timestamp', how='inner')  # require obs to build targets
         if era5 is not None:
@@ -251,6 +263,11 @@ def build_dataset(
         df['y_residual_cms'] = df['usgs_cms'] - df['nwm_cms']
         df['y_corrected_cms'] = df['usgs_cms']
         df['site_name'] = site_name  # ensure present consistently
+        df['site_id'] = site_id
+        df['regulation_status'] = info.get('regulation_status')
+        df['state'] = info.get('state')
+        df['region'] = info.get('region')
+        df['biome'] = info.get('biome')
         frames.append(df)
 
     if not frames:
@@ -259,16 +276,6 @@ def build_dataset(
     out = pd.concat(frames, ignore_index=True)
     out = out.sort_values(['site_name', 'timestamp'])
     out = out.drop_duplicates(subset=['site_name', 'timestamp'])
-
-    # Attach NLCD (static). Perform a permissive left-join by site_name if available.
-    nlcd = load_nlcd_metrics(raw_dir)
-    if nlcd is not None:
-        key = 'site_name'
-        if key in nlcd.columns:
-            # avoid column collisions
-            dup_cols = [c for c in nlcd.columns if c in out.columns and c != key]
-            nlcd_ren = nlcd.drop(columns=dup_cols)
-            out = out.merge(nlcd_ren, on=key, how='left')
 
     # Save outputs
     if sites:
@@ -295,5 +302,18 @@ if __name__ == '__main__':
     ap.add_argument('--start', default=None, help='Start date (YYYY-MM-DD) to filter NWM/USGS')
     ap.add_argument('--end', default=None, help='End date (YYYY-MM-DD) to filter NWM/USGS')
     ap.add_argument('--sites', nargs='*', default=None, help='Optional list of site IDs to process')
+    ap.add_argument(
+        '--nwm-version',
+        default='v2',
+        choices=['v2', 'v3'],
+        help='Retrospective NWM archive to load (default: v2)',
+    )
     args = ap.parse_args()
-    build_dataset(raw_dir=args.raw_dir, out_dir=args.out_dir, start=args.start, end=args.end, sites=args.sites)
+    build_dataset(
+        raw_dir=args.raw_dir,
+        out_dir=args.out_dir,
+        start=args.start,
+        end=args.end,
+        sites=args.sites,
+        nwm_version=args.nwm_version,
+    )

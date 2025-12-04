@@ -36,9 +36,18 @@ def main() -> None:
     parser.add_argument("--skip-hpo", action="store_true")
     parser.add_argument("--skip-train", action="store_true")
     parser.add_argument("--skip-plots", action="store_true")
+    parser.add_argument("--start", default="2010-01-01", help="Start date for dataset build (YYYY-MM-DD)")
+    parser.add_argument("--end", default="2020-12-31", help="End date for dataset build (YYYY-MM-DD)")
+    parser.add_argument("--train-start", default="2010-01-01", help="Training window start")
+    parser.add_argument("--train-end", default="2018-12-31", help="Training window end")
+    parser.add_argument("--val-start", default="2019-01-01", help="Validation window start")
+    parser.add_argument("--val-end", default="2019-12-31", help="Validation window end")
+    parser.add_argument("--nwm-version", default="v2", choices=["v2", "v3"], help="Retrospective archive to use")
     args = parser.parse_args()
 
-    default_tag = f"{args.site_id}_20100101_20221231"
+    start_tag = args.start.replace("-", "")
+    end_tag = args.end.replace("-", "")
+    default_tag = f"{args.site_id}_{start_tag}_{end_tag}"
     data_path = Path(args.data_path) if args.data_path else Path("data/clean/modeling") / f"hourly_training_{default_tag}.parquet"
 
     base_env = {"PYTHONPATH": str(ROOT)}
@@ -52,9 +61,11 @@ def main() -> None:
             "--out-dir",
             "data/clean/modeling",
             "--start",
-            "2010-01-01",
+            args.start,
             "--end",
-            "2022-12-31",
+            args.end,
+            "--nwm-version",
+            args.nwm_version,
             "--sites",
             args.site_id,
         ], env=base_env)
@@ -63,15 +74,17 @@ def main() -> None:
     needs_hpo = not args.skip_hpo
 
     if not args.skip_train:
-        run_cmd(
-            [
-                MAKE,
-                "train_full",
-                f"OUTPUT_PREFIX={args.output_prefix}",
-                f"DATA_PATH={data_path}",
-            ],
-            env=base_env,
-        )
+        train_cmd = [
+            MAKE,
+            "train_full",
+            f"OUTPUT_PREFIX={args.output_prefix}",
+            f"DATA_PATH={data_path}",
+            f"TRAIN_START={args.train_start}",
+            f"TRAIN_END={args.train_end}",
+            f"VAL_START={args.val_start}",
+            f"VAL_END={args.val_end}",
+        ]
+        run_cmd(train_cmd, env=base_env)
 
         if metrics_path.exists():
             with open(metrics_path) as fh:
@@ -118,6 +131,10 @@ def main() -> None:
             "train_full",
             f"OUTPUT_PREFIX={args.output_prefix}",
             f"DATA_PATH={data_path}",
+            f"TRAIN_START={args.train_start}",
+            f"TRAIN_END={args.train_end}",
+            f"VAL_START={args.val_start}",
+            f"VAL_END={args.val_end}",
         ] + [f"{k}={v}" for k, v in overrides.items()]
         run_cmd(retrain_cmd, env=base_env)
 

@@ -4,7 +4,7 @@
 Example usage (M1/M2 Mac, MPS backend):
 
     PYTHONPATH=. python3.11 modeling/hpo_optuna.py \
-        --data data/clean/modeling/hourly_training_2010-01-01_2022-12-31.parquet \
+        --data data/clean/modeling/hourly_training_03479000_20100101_20201231.parquet \
         --study-name hydra_full_opt \
         --n-trials 20 \
         --epochs 60 \
@@ -143,7 +143,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--n-trials", type=int, default=8)
     parser.add_argument("--epochs", type=int, default=25)
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--train-days", type=int, default=4018)
+    parser.add_argument("--train-days", type=int, default=3287)
     parser.add_argument("--val-days", type=int, default=365)
     parser.add_argument("--patience", type=int, default=5)
     parser.add_argument("--moe-experts", type=int, default=3)

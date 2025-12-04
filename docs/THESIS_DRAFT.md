@@ -1,10 +1,12 @@
 # Thesis Draft Notes
 
+> **Note:** Sections below capture the earlier 2010–2022 baseline experiments. The active plan (train 2010–2018, validate 2019, test 2020 on NWM v2 only) is tracked in `docs/MODEL_RUN_2010_2020.md`; update the narrative accordingly as new results land.
+
 ## Data Acquisition Pipeline
 ### Overview
 - Objective: assemble hourly-aligned inputs that enable correcting National Water Model (NWM) streamflow forecasts with site-specific observations.
-- Core sources: USGS observed discharge (ground truth), NWM CHRTOUT retrospective/operational analysis (model baseline), ERA5 reanalysis (meteorological context), NLCD 2021 static land-cover metrics (physiographic context).
-- Design principle: favor authoritative, well-maintained archives that cover 2010–2022 without gaps while exposing recent 2023+ windows for future extension.
+- Core sources: USGS observed discharge (ground truth), NWM CHRTOUT retrospective/operational analysis (model baseline), ERA5 reanalysis (meteorological context); static NLCD land-cover metrics have been retired in favor of lightweight metadata (e.g., regulation flag).
+- Design principle: favor authoritative, well-maintained archives that cover the full NWM v2 era (2010–2020) without gaps while exposing recent windows for future extension.
 
 ### NWM Streamflow Collection (`data_acquisition_scripts/nwm.py`)
 - Supports retrospective v3.0 (2021–2023) and operational analysis assimilation (Feb 2023 onward) buckets with automatic stitching across the archive boundary.
@@ -26,9 +28,9 @@
 - Rationale: meteorological forcings help explain departures between NWM simulations and observed flows, capturing weather-driven dynamics absent from pure baselines.
 
 ### Dataset Assembly (`modeling/build_training_dataset.py`)
-- Aligns NWM, USGS, ERA5, and NLCD static metrics into an hourly panel; computes residual (`y_residual_cms`) and corrected (`y_corrected_cms`) targets.
+- Aligns NWM, USGS, and ERA5 into an hourly panel; computes residual (`y_residual_cms`) and corrected (`y_corrected_cms`) targets plus optional metadata columns.
 - Enforces safe temporal joins: ERA5 6-hour data are matched within ±3 hours without forward leakage; rows require both NWM and USGS coverage.
-- Outputs Parquet shards (e.g., 2010–2022 train/val/test splits) plus small CSV samples for inspection under `data/clean/modeling/`.
+- Outputs Parquet shards (e.g., 2010–2020 train/val/test splits) plus small CSV samples for inspection under `data/clean/modeling/`.
 - Rationale: creating a single, normalized dataset reduces feature-engineering drift and guarantees reproducible experiments across transformer and recurrent baselines.
 
 ## Model Architectures

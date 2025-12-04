@@ -21,9 +21,9 @@ All collectors assume the root-level `requirements.txt` has been installed (nota
 ## Included files
 
 - `era5.py`
-- `land_use.py`
 - `nwm.py`
 - `usgs.py`
+- `land_use.py` (legacy NLCD helper, no longer part of the modeling pipeline)
 
 ## Quickstart commands
 
@@ -38,12 +38,12 @@ python data_acquisition_scripts/usgs.py \
 	--end-date 2023-12-31 \
 	--out-dir data/raw/usgs
 
-# NWM v3 auto (retrospective + operational)
+# NWM v2 retrospective (2010–2020)
 python data_acquisition_scripts/nwm.py \
-	--mode v3_auto \
+	--mode retrospective \
 	--start-date 2010-01-01 \
-	--end-date 2023-12-31 \
-	--out-dir data/raw/nwm_v3 \
+	--end-date 2020-12-31 \
+	--out-dir data/raw/nwm_v2 \
 	--max-workers 6 \
 	--resume
 
@@ -54,14 +54,11 @@ python data_acquisition_scripts/era5.py \
 	--cadence hourly \
 	--out-dir data/raw/era5
 
-# NLCD land-use metrics
-python data_acquisition_scripts/land_use.py \
-	--sites 03479000 \
-	--out-dir data/raw/land_use
 ```
+
+The former NLCD collector (`land_use.py`) is retained for archival purposes only; static land-use fractions are no longer merged into the training parquet.
 
 When migrating to a new project, remember that these modules expect supporting configuration (for
 example, `config/master_study_sites.py`) and the same Python dependencies used in this repository.
 If you plan to trim the site list, update the relevant constants and helper functions after copying
 these files to the new codebase.
-

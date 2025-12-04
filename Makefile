@@ -1,6 +1,6 @@
 PYTHON ?= python3
 PYTHONPATH ?= .
-DATA_PATH ?= data/clean/modeling/hourly_training_2010-01-01_2022-12-31.parquet
+DATA_PATH ?= data/clean/modeling/hourly_training_all_sites_20100101_20201231.parquet
 OUTPUT_PREFIX ?= hydra_v2_full_q
 FIGURES_DIR ?= results/figures/$(OUTPUT_PREFIX)
 STATION_NAME ?= "Watauga River, NC"
@@ -12,7 +12,11 @@ HPO_OUTPUT_PREFIX ?= hydra_v2_optuna
 SEQ_LEN ?= 168
 EPOCHS ?= 40
 BATCH_SIZE ?= 64
-TRAIN_DAYS ?= 4018
+TRAIN_START ?= 2010-01-01
+TRAIN_END ?= 2018-12-31
+VAL_START ?= 2019-01-01
+VAL_END ?= 2019-12-31
+TRAIN_DAYS ?= 3287
 VAL_DAYS ?= 365
 PATIENCE ?= 12
 D_MODEL ?= 128
@@ -29,6 +33,10 @@ TRAIN_ARGS = \
 	--batch-size $(BATCH_SIZE) \
 	--train-days $(TRAIN_DAYS) \
 	--val-days $(VAL_DAYS) \
+	--train-start $(TRAIN_START) \
+	--train-end $(TRAIN_END) \
+	--val-start $(VAL_START) \
+	--val-end $(VAL_END) \
 	--patience $(PATIENCE) \
 	--d-model $(D_MODEL) \
 	--num-heads $(NUM_HEADS) \
@@ -48,7 +56,7 @@ all: train_full plots_full
 train_full: $(EVAL_CSV)
 
 $(EVAL_CSV):
-	@echo "Training Hydra v2 with full timeframe splits (train=2010-2020, val=2021, test=2022)"
+	@echo "Training Hydra v2 with full timeframe splits (train=2010-2018, val=2019, test=2020)"
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) modeling/train_quick_transformer_torch.py $(TRAIN_ARGS)
 	@echo "Training complete; evaluation written to $(EVAL_CSV)"
 

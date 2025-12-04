@@ -4,7 +4,7 @@ Date: 2025-10-07
 Owner: Mitchel Carson
 
 ## Summary
-- Hybrid transformer (Hydra v2) trained on NWM 2010–2020 with 2021 validation delivers ~10% RMSE improvement versus raw NWM; serves as current control experiment.
+- Hybrid transformer (Hydra v2) targeting NWM v2 data (train 2010–2018, val 2019, test 2020) will replace the earlier 2010–2022 control experiment once the refreshed run completes.
 - Trial 1 from the latest Optuna sweep is the new “run of record” for Watauga (RMSE 5.137, NSE 0.644, KGE 0.715); all writing/plotting now references this configuration.
 - Immediate milestone is completing the thesis/WRR draft—including publication-ready visualizations that compare NWM, LSTM, and Hydra for Watauga—and locking reproducible assets for that narrative.
 - Near-term scope is intentionally limited to Watauga; multi-site exploration is logged as future work once the single-site story is finalized.
@@ -20,9 +20,9 @@ Owner: Mitchel Carson
 - Document a clear outline for scaling the residual-correction workflow to additional USGS sites; execution is deferred to future work.
 
 ## Current Status Snapshot
-- Data pipeline produces aligned hourly datasets (2010–2022) for training/validation/testing; residual labels verified.
+- Data pipeline produces aligned hourly datasets (2010–2020) for training/validation/testing; residual labels verified.
 - Hydra v2 implementation (`modeling/train_quick_transformer_torch.py`) is operational with quick-eval tooling.
-- First full-run Hydra v2 sweep (#1) trained on 2010–2022 with 2022 evaluation delivers 65% RMSE reduction versus NWM (gain_scale=0.05, logvar clamp [-4, 2], quantile weight 0.1); lower tails are under-covered (q10≈0%) while q90 over-covers (≈100%), signalling calibration work.
+- First full-run Hydra v2 sweep (#1) will retrain on 2010–2018 with 2019 validation and 2020 evaluation (NWM v2 only) to establish the refreshed baseline before iterating on calibration tweaks.
 - LSTM baseline script exists but requires hyperparameter sweeps to avoid divergence and to match Hydra preprocessing.
 - WRR LaTeX template identified; outline discussions established (four-author format, title flexibility).
 - Visual assets are limited to diagnostic plots; publication-grade figures outstanding.
@@ -75,7 +75,7 @@ Owner: Mitchel Carson
 
 ## Dependencies & Risks
 - **Compute/GPU availability:** Hydra sweeps require reliable GPU resources; secure access for overnight runs.
-- **Data completeness:** Ensure NWM/USGS coverage through 2022; monitor for missing hours or corrupt pulls.
+- **Data completeness:** Ensure NWM/USGS coverage through 2020; monitor for missing hours or corrupt pulls.
   - Mitigation: automated QA scripts and reruns for gaps.
 - **Overfitting risks:** Use validation monitoring, early stopping, and dropout/weight decay to prevent overfitting on limited station data.
 - **Writing bandwidth:** Balance coding and writing tasks; schedule protected writing blocks.

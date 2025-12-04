@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a study-area map and static feature summary for a given site."""
+"""Generate a study-area map and metadata summary for a given site."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from pathlib import Path
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
-import pandas as pd
 import urllib.request
 from shapely.geometry import Point, box
 
@@ -36,27 +35,7 @@ def load_site_info(site_id: str) -> dict:
     return MASTER_STUDY_SITES[site_id]
 
 
-def load_land_use(site_id: str, csv_path: Path) -> pd.Series:
-    df = pd.read_csv(csv_path)
-    key_col = "site_key" if "site_key" in df.columns else df.columns[0]
-    # Ensure site identifiers retain leading zeros regardless of CSV dtype.
-    df_ids = df[key_col].astype(str).str.zfill(len(site_id))
-    row = df.loc[df_ids == site_id]
-    if row.empty:
-        raise ValueError(f"No NLCD row found for {site_id} in {csv_path}")
-    row = row.iloc[0]
-    columns = [
-        "urban_percent",
-        "forest_percent",
-        "agriculture_percent",
-        "impervious_percent",
-        "water_wetlands_percent",
-    ]
-    data = {col: float(row[col]) for col in columns if col in row}
-    return pd.Series(data)
-
-
-def plot_map(site_info: dict, land_use: pd.Series, out_path: Path) -> None:
+def plot_map(site_info: dict, out_path: Path) -> None:
     world = load_world_boundaries()
     name_col = "ADMIN" if "ADMIN" in world.columns else "name"
     usa = world[world[name_col] == "United States of America"]
@@ -80,7 +59,7 @@ def plot_map(site_info: dict, land_use: pd.Series, out_path: Path) -> None:
     point.plot(ax=axes[0], color="red", markersize=50)
     axes[0].set_xlim(lon - 12, lon + 12)
     axes[0].set_ylim(lat - 8, lat + 8)
-    axes[0].set_title("Watauga River Gauge Location")
+    axes[0].set_title(f"{site_name} Gauge Location")
     axes[0].set_xlabel("Longitude")
     axes[0].set_ylabel("Latitude")
     axes[0].annotate(
@@ -94,14 +73,24 @@ def plot_map(site_info: dict, land_use: pd.Series, out_path: Path) -> None:
     )
     axes[0].set_aspect("equal", adjustable="box")
 
-    categories = land_use.index
-    values = land_use.values
-    axes[1].bar(categories, values, color="#4c72b0")
-    axes[1].set_ylim(0, max(values) * 1.2)
-    axes[1].set_ylabel("Percent of Watershed (%)")
-    axes[1].set_title("NLCD 2021 Land-Cover Composition")
-    for idx, val in enumerate(values):
-        axes[1].text(idx, val + max(values) * 0.05, f"{val:.1f}%", ha="center", fontsize=9)
+    axes[1].axis("off")
+    metadata = [
+        ("USGS ID", site_info.get("usgs_id", "N/A")),
+        ("NWM COMID", site_info.get("nwm_comid", "N/A")),
+        ("State", site_info.get("state", "N/A")),
+        ("Region", site_info.get("region", "N/A")),
+        ("Biome", site_info.get("biome", "N/A")),
+        ("Regulation", site_info.get("regulation_status", "Unknown")),
+    ]
+    table = axes[1].table(
+        cellText=[[key, value] for key, value in metadata],
+        colLabels=["Field", "Value"],
+        cellLoc="left",
+        loc="center",
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    axes[1].set_title("Site Metadata")
 
     fig.tight_layout()
     fig.savefig(out_path, dpi=300)
@@ -111,11 +100,6 @@ def plot_map(site_info: dict, land_use: pd.Series, out_path: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Plot study area map for a site.")
     parser.add_argument("--site-id", default="03479000", help="USGS site ID")
-    parser.add_argument(
-        "--land-use-csv",
-        type=Path,
-        default=Path("data/raw/land_use/nlcd_2021_land_use_metrics.csv"),
-    )
     parser.add_argument(
         "--output",
         type=Path,
@@ -127,8 +111,7 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     site_info = load_site_info(args.site_id)
-    land_use = load_land_use(args.site_id, args.land_use_csv)
-    plot_map(site_info, land_use, out_path)
+    plot_map(site_info, out_path)
 
 
 if __name__ == "__main__":
