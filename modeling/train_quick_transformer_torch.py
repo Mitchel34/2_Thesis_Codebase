@@ -10,6 +10,12 @@ Version 2 adds:
 - Transformer encoder with attention pooling and multi-window statistics
 - Heteroscedastic heads for residual and corrected flow predictions
 - Multi-objective loss (Gaussian NLL, NSE surrogate, quantile pinball) on asinh-transformed targets
+
+Minimal invocation (matches docs/MODEL_RUN_2010_2022.md):
+
+    PYTHONPATH=. python modeling/train_quick_transformer_torch.py \
+        --data data/clean/modeling/hourly_training_03479000_20100101_20221231.parquet \
+        --seq-len 168 --epochs 40 --batch-size 64
 """
 
 import argparse

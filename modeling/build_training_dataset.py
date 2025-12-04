@@ -24,6 +24,15 @@ Assumptions:
 Notes:
 - If ERA5 is 6-hourly, we align to hourly via reindex with nearest tolerance=3H (no forward-looking leakage)
 - We filter to timestamps where both NWM and USGS obs exist to form targets
+
+Example (Watauga baseline):
+
+    python modeling/build_training_dataset.py \
+        --raw-dir data/raw \
+        --out-dir data/clean/modeling \
+        --start 2010-01-01 \
+        --end 2022-12-31 \
+        --sites 03479000
 """
 
 import os

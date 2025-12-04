@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""End-to-end pipeline for a single site (data → train → plots)."""
+"""End-to-end pipeline for a single site (data → train → plots).
+
+Usage example (Watauga baseline):
+
+    python scripts/run_site_pipeline.py 03479000 "Watauga River, NC" watauga_hydra \
+        --hpo-trials 10
+
+Inputs:
+- USGS site_id + readable name.
+- Optional OUTPUT_PREFIX/data path overrides.
+- Flags to skip expensive stages (build/hpo/train/plots).
+"""
 
 from __future__ import annotations
 

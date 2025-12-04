@@ -45,6 +45,21 @@ This repository holds the data acquisition scripts, modeling code, and thesis do
   pre-commit install
   ```
 
+## Quick Start: Reproducing the Watauga Baseline
+
+If you simply need to regenerate the thesis baseline for the Watauga River gauge (USGS 03479000), run the turnkey script below. It installs the environment, acquires ERA5 + NWM + USGS data for 2010-01-01..2022-12-31, builds the modeling parquet, and launches `make train_full`.
+
+```bash
+bash scripts/reproduce_watauga_baseline.sh
+```
+
+Prerequisites:
+- **Copernicus Climate Data Store account** with a populated `~/.cdsapirc` file so the ERA5 collector can authenticate.
+- **Internet access + disk space (~30 GB)** for the raw feeds under `data/raw/`.
+- *Optional* AWS credentials if you mirror NWM buckets privately; anonymous NOAA access works for the default settings.
+
+Outputs land in `data/raw/` (raw feeds), `data/clean/modeling/` (parquet + evaluation CSV), and `local_only/` (plots/logs once you copy them). The script is idempotent—rerunning it reuses any files that already exist and only recomputes the missing pieces.
+
 ## Credentials & External Access
 
 | Source | Requirements |
@@ -144,3 +159,10 @@ Use these notes as the single source of truth for regenerating data and models; 
 Contributions are welcome! Please read `CONTRIBUTING.md` for environment setup, testing, and
 documentation expectations before opening a pull request. Running `pre-commit install` keeps your
 commits aligned with the automated formatting and linting rules.
+
+## Changelog: Reproducibility Cleanup
+
+- Added `scripts/reproduce_watauga_baseline.sh` to stand up the entire Watauga workflow (environment → data → dataset → training) with one command.
+- Expanded `README.md` with a dedicated Quick Start plus clearer notes on prerequisites and output locations.
+- Synced `docs/MODEL_RUN_2010_2022.md` and script defaults so the documented run exactly matches the automated reproduction path.
+- Pinned Python dependencies in `requirements.txt` for deterministic installs and documented how large artefacts belong in `local_only/`.
